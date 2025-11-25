@@ -76,11 +76,46 @@ num = 0
 
 base_to_gripper_transforms = []
 
+meshes_o3d = {}
+
+for link in robot_urdf.links:
+
+    if len(link.visuals) == 0:
+        continue
+
+    for visual in link.visuals:
+
+        # Must be mesh geometry
+        if not hasattr(visual.geometry, "mesh"):
+            continue
+
+        # Correct path
+        mesh_path = os.path.join("calibration", visual.geometry.mesh.filename)
+        mesh_o3d = o3d.io.read_triangle_mesh(mesh_path)
+
+        if mesh_o3d.is_empty():
+            print("EMPTY MESH:", mesh_path)
+            continue
+
+        meshes_o3d[mesh_path] = mesh_o3d
+
 while True:
     action = teleop_1_device.get_action()
     robot_1.send_action(action)
 
-    joint_positions = {
+    joint_positions_1 = {
+        'shoulder_pan': map_joint_value(action['shoulder_pan.pos'], raw_ranges['shoulder_pan'], phys_ranges['shoulder_pan']),
+        'shoulder_lift': map_joint_value(action['shoulder_lift.pos'], raw_ranges['shoulder_lift'], phys_ranges['shoulder_lift']),
+        'elbow_flex': map_joint_value(action['elbow_flex.pos'], raw_ranges['elbow_flex'], phys_ranges['elbow_flex']),
+        'wrist_flex': map_joint_value(action['wrist_flex.pos'], raw_ranges['wrist_flex'], phys_ranges['wrist_flex']),
+        'wrist_roll': map_joint_value(action['wrist_roll.pos'], raw_ranges['wrist_roll'], phys_ranges['wrist_roll']),
+        'gripper': map_joint_value(action['gripper.pos'], raw_ranges['gripper'], phys_ranges['gripper'])
+    }
+
+    action = teleop_2_device.get_action()
+    robot_2.send_action(action)
+
+    joint_positions_2 = {
         'shoulder_pan': map_joint_value(action['shoulder_pan.pos'], raw_ranges['shoulder_pan'], phys_ranges['shoulder_pan']),
         'shoulder_lift': map_joint_value(action['shoulder_lift.pos'], raw_ranges['shoulder_lift'], phys_ranges['shoulder_lift']),
         'elbow_flex': map_joint_value(action['elbow_flex.pos'], raw_ranges['elbow_flex'], phys_ranges['elbow_flex']),
@@ -91,51 +126,59 @@ while True:
 
     #T = robot_urdf.link_fk(cfg=joint_positions)[robot_urdf.link_map[link_name]]
 
-    #action = teleop_2_device.get_action()
-    #robot_2.send_action(action)
-
     #print("Position:", T[:3, 3])
 
-    surface_points_world = []
+    robot_points_1 = []
+    robot_points_2 = []
 
     for link in robot_urdf.links:
 
         if len(link.visuals) == 0:
             continue
-        visual = link.visuals[0]
 
-        # Must be mesh geometry
-        if not hasattr(visual.geometry, "mesh"):
-            continue
+        for visual in link.visuals:
 
-        # Correct path
-        mesh_path = os.path.join("calibration", visual.geometry.mesh.filename)
-        mesh_o3d = o3d.io.read_triangle_mesh(mesh_path)
-        if mesh_o3d.is_empty():
-            print("EMPTY MESH:", mesh_path)
-            continue
+            # Must be mesh geometry
+            if not hasattr(visual.geometry, "mesh"):
+                continue
 
-        # Sample points in raw mesh frame
-        pcd = mesh_o3d.sample_points_uniformly(500)
-        pts_mesh = np.asarray(pcd.points)  # (500,3)
+            # Correct path
+            mesh_path = os.path.join("calibration", visual.geometry.mesh.filename)
 
-        # ----- APPLY VISUAL ORIGIN TRANSFORM -----
-        T_vis = visual.origin  # THIS is your 4×4 transform
-        R_vis = T_vis[:3, :3]
-        t_vis = T_vis[:3, 3]
+            mesh_o3d = meshes_o3d[mesh_path]
 
-        pts_visual = (R_vis @ pts_mesh.T).T + t_vis
+            # Sample points in raw mesh frame
+            pcd = mesh_o3d.sample_points_uniformly(500)
+            pts_mesh = np.asarray(pcd.points)  # (500,3)
 
-        # ----- APPLY LINK FK -----
-        T_link = robot_urdf.link_fk(cfg=joint_positions)[robot_urdf.link_map[link.name]]
-        R_link = T_link[:3, :3]
-        t_link = T_link[:3, 3]
+            # ----- APPLY VISUAL ORIGIN TRANSFORM -----
+            T_vis = visual.origin  # THIS is your 4×4 transform
+            R_vis = T_vis[:3, :3]
+            t_vis = T_vis[:3, 3]
 
-        pts_world = (R_link @ pts_visual.T).T + t_link
+            pts_visual = (R_vis @ pts_mesh.T).T + t_vis
 
-        surface_points_world.append(pts_world)
+            # ----- APPLY LINK FK -----
+            T_link_1 = robot_urdf.link_fk(cfg=joint_positions_1)[robot_urdf.link_map[link.name]]
+            R_link_1 = T_link_1[:3, :3]
+            t_link_1 = T_link_1[:3, 3]
 
-    surface_points_world = np.concatenate(surface_points_world, axis=0)
+            r_1 = (R_link_1 @ pts_visual.T).T + t_link_1
+            robot_points_1.append(r_1)
+
+            T_link_2 = robot_urdf.link_fk(cfg=joint_positions_2)[robot_urdf.link_map[link.name]]
+            R_link_2 = T_link_2[:3, :3]
+            t_link_2 = T_link_2[:3, 3]
+
+            r_2 = (R_link_2 @ pts_visual.T).T + t_link_2
+            robot_points_2.append(r_2)
+
+    robot_points_1 = np.concatenate(robot_points_1, axis=0)
+    robot_points_2 = np.concatenate(robot_points_2, axis=0)
+
+    robot_points_2[:,1] += 0.5
+
+    robot_points = np.concatenate([robot_points_1, robot_points_2], axis=0)
 
     datapoints = stream.get_datapoints()
     fused = get_fused_point_cloud(datapoints)
@@ -143,4 +186,4 @@ while True:
     # Convert to numpy
     pts = np.asarray(fused.points)
     cols = np.asarray(fused.colors) if fused.has_colors() else None
-    pcd_viewer.update(pts, surface_points_world, cols)
+    pcd_viewer.update(pts, robot_points, cols)
