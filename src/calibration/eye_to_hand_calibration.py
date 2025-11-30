@@ -13,7 +13,7 @@ def write_camera_transform(serial, matrix, json_path):
 
     data = {
         serial: {
-            "X_WT": matrix_list
+            "X_WC": matrix_list
         }
     }
 

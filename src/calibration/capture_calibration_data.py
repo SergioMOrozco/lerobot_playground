@@ -67,12 +67,6 @@ teleop_2_device.connect()
 
 
 
-serials = ["244622072067"]
-stream = MultiRealSenseStream(serials, "extrinsic_calibration.json", "intrinsic_calibration.json")
-pcd_viewer = LivePointCloudViewer()
-
-
-
 num = 0
 
 base_to_gripper_transforms = []
@@ -84,26 +78,20 @@ while True:
     action = teleop_2_device.get_action()
     robot_2.send_action(action)
 
+    j = robot_1.get_observation()
+
     joint_positions = {
-        'shoulder_pan': map_joint_value(action['shoulder_pan.pos'], raw_ranges['shoulder_pan'], phys_ranges['shoulder_pan']),
-        'shoulder_lift': map_joint_value(action['shoulder_lift.pos'], raw_ranges['shoulder_lift'], phys_ranges['shoulder_lift']),
-        'elbow_flex': map_joint_value(action['elbow_flex.pos'], raw_ranges['elbow_flex'], phys_ranges['elbow_flex']),
-        'wrist_flex': map_joint_value(action['wrist_flex.pos'], raw_ranges['wrist_flex'], phys_ranges['wrist_flex']),
-        'wrist_roll': map_joint_value(action['wrist_roll.pos'], raw_ranges['wrist_roll'], phys_ranges['wrist_roll']),
-        'gripper': map_joint_value(action['gripper.pos'], raw_ranges['gripper'], phys_ranges['gripper'])
+        'shoulder_pan': map_joint_value(j['shoulder_pan.pos'], raw_ranges['shoulder_pan'], phys_ranges['shoulder_pan']),
+        'shoulder_lift': map_joint_value(j['shoulder_lift.pos'], raw_ranges['shoulder_lift'], phys_ranges['shoulder_lift']),
+        'elbow_flex': map_joint_value(j['elbow_flex.pos'], raw_ranges['elbow_flex'], phys_ranges['elbow_flex']),
+        'wrist_flex': map_joint_value(j['wrist_flex.pos'], raw_ranges['wrist_flex'], phys_ranges['wrist_flex']),
+        'wrist_roll': map_joint_value(j['wrist_roll.pos'], raw_ranges['wrist_roll'], phys_ranges['wrist_roll']),
+        'gripper': map_joint_value(j['gripper.pos'], raw_ranges['gripper'], phys_ranges['gripper'])
     }
 
     T = robot_urdf.link_fk(cfg=joint_positions)[robot_urdf.link_map[link_name]]
 
     print("Position:", T[:3, 3])
-
-    datapoints = stream.get_datapoints()
-    fused = get_fused_point_cloud(datapoints, T[:3, 3])
-
-    # Convert to numpy
-    pts = np.asarray(fused.points)
-    cols = np.asarray(fused.colors) if fused.has_colors() else None
-    pcd_viewer.update(pts, cols)
 
     succes, img = cap.read()
 

@@ -42,19 +42,32 @@ image_paths = [
     "calibration_data/images/img2.png",
     "calibration_data/images/img3.png",
     "calibration_data/images/img4.png",
-    "calibration_data/images/img5.png",
-    "calibration_data/images/img6.png",
-    "calibration_data/images/img7.png",
-    "calibration_data/images/img8.png",
-    "calibration_data/images/img9.png",
-    "calibration_data/images/img10.png",
-    "calibration_data/images/img11.png",
-    "calibration_data/images/img12.png",
-    "calibration_data/images/img13.png",
-    "calibration_data/images/img14.png",
-    "calibration_data/images/img15.png",
-    "calibration_data/images/img16.png",
-    "calibration_data/images/img17.png",
+    #"calibration_data/images/img5.png",
+    #"calibration_data/images/img6.png",
+    #"calibration_data/images/img7.png",
+    #"calibration_data/images/img8.png",
+    #"calibration_data/images/img9.png",
+    #"calibration_data/images/img10.png",
+    #"calibration_data/images/img11.png",
+    #"calibration_data/images/img12.png",
+    #"calibration_data/images/img13.png",
+    #"calibration_data/images/img14.png",
+    #"calibration_data/images/img15.png",
+    #"calibration_data/images/img16.png",
+    #"calibration_data/images/img17.png",
+    #"calibration_data/images/img18.png",
+    #"calibration_data/images/img19.png",
+    #"calibration_data/images/img20.png",
+    #"calibration_data/images/img21.png",
+    #"calibration_data/images/img22.png",
+    #"calibration_data/images/img23.png",
+    #"calibration_data/images/img24.png",
+    #"calibration_data/images/img25.png",
+    #"calibration_data/images/img26.png",
+    #"calibration_data/images/img27.png",
+    #"calibration_data/images/img28.png",
+    #"calibration_data/images/img29.png",
+    #"calibration_data/images/img30.png",
 
 ] # List of paths to your calibration images
 
@@ -86,7 +99,7 @@ for image_path in image_paths:
         # Draw and display the corners
         cv2.drawChessboardCorners(img, pattern_size, corners2, ret)
         cv2.imshow('img', img)
-        cv2.waitKey(10)
+        cv2.waitKey(100)
 
 cv2.destroyAllWindows()
 
