@@ -66,11 +66,10 @@ def foxglove_pointcloud_from_numpy(points: np.ndarray, colors=None):
         PackedElementField(name="x", offset=0,  type=PackedElementFieldNumericType.Float32),
         PackedElementField(name="y", offset=4,  type=PackedElementFieldNumericType.Float32),
         PackedElementField(name="z", offset=8,  type=PackedElementFieldNumericType.Float32),
-        PackedElementField(name="rgba", offset=12, type=PackedElementFieldNumericType.Uint32),
-        #PackedElementField(name="b", offset=12, type=PackedElementFieldNumericType.Uint8),
-        #PackedElementField(name="g", offset=13, type=PackedElementFieldNumericType.Uint8),
-        #PackedElementField(name="r", offset=14, type=PackedElementFieldNumericType.Uint8),
-        #PackedElementField(name="a", offset=15, type=PackedElementFieldNumericType.Uint8),
+        PackedElementField(name="red", offset=12, type=PackedElementFieldNumericType.Uint8),
+        PackedElementField(name="green", offset=13, type=PackedElementFieldNumericType.Uint8),
+        PackedElementField(name="blue", offset=14, type=PackedElementFieldNumericType.Uint8),
+        PackedElementField(name="alpha", offset=15, type=PackedElementFieldNumericType.Uint8),
     ]
 
     identity_pose = Pose(
@@ -87,44 +86,6 @@ def foxglove_pointcloud_from_numpy(points: np.ndarray, colors=None):
         data=data
     )
 
-#def foxglove_pointcloud_from_numpy(points: np.ndarray, colors=None):
-#
-#    if colors is not None:
-#        data = np.concatenate([points, colors, np.ones((colors.shape[0],1))], axis=1)
-#    else:
-#        data = points
-#
-#    data = data.astype(np.float32).tobytes()
-#
-#    # Foxglove expects PackedElementField(name, offset_bytes, datatype)
-#    fields=[
-#        PackedElementField(name="x", offset=0, type=PackedElementFieldNumericType.Float32),
-#        PackedElementField(name="y", offset=4, type=PackedElementFieldNumericType.Float32),
-#        PackedElementField(name="z", offset=8, type=PackedElementFieldNumericType.Float32),
-#    ]
-#
-#    if colors is not None:
-#        fields.extend([
-#            PackedElementField(name="rgba", offset=12, type=PackedElementFieldNumericType.Uint32),
-#        ])
-#        stride = 16
-#    else:
-#        stride = 12
-#
-#    identity_pose = Pose(
-#        position=Vector3(x=0.0, y=0.0, z=0.0),
-#        orientation=Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
-#    )
-#
-#    return PointCloud(
-#        timestamp=None,        # optional
-#        frame_id="base_link",
-#        pose=identity_pose,
-#        point_stride=stride,       # 7 floats × 4 bytes
-#        fields=fields,
-#        data=data
-#    )
-
 class SystemStateViewer:
     def __init__(self, serials, extrinsic_json, point_size=2.0, tune=True):
 
@@ -135,14 +96,16 @@ class SystemStateViewer:
         self.prev_tuned_state = None
 
         if tune:
-            self.state_tuner = StateTuner([
-                "shoulder_pan",
-                "shoulder_lift",
-                "elbow_flex",
-                "wrist_flex",
-                "wrist_roll",
-                "gripper"
-            ])
+            self.state_tuner = StateTuner(
+                [
+                    "shoulder_pan",
+                    "shoulder_lift",
+                    "elbow_flex",
+                    "wrist_flex",
+                    "wrist_roll",
+                    "gripper"
+                ]
+            )
             self.state_tuner.start()
 
         print("Connecting robots...")
@@ -156,28 +119,6 @@ class SystemStateViewer:
 
         # Start the Foxglove server
         server = foxglove.start_server()
-
-    def update_translation(self, axis, sign):
-        """axis = 0,1,2 ; sign = +1 or -1"""
-        self.T[:3, 3][axis] += sign * self.trans_step
-
-        self.teleop_system.stream.extrinsics[self.serial]["X_WC"] = self.T
-
-    def update_rotation(self, axis, sign):
-        """Rotate about X/Y/Z axis by rot_step"""
-        R = self.T[:3, :3]
-        step = sign * self.rot_step
-
-        if axis == 0:
-            R_new = R @ rot_x(step)
-        elif axis == 1:
-            R_new = R @ rot_y(step)
-        elif axis == 2:
-            R_new = R @ rot_z(step)
-
-        self.T[:3, :3] = R_new
-
-        self.teleop_system.stream.extrinsics[self.serial]["X_WC"] = self.T
 
     def rpy_to_matrix(self, rpy):
 
@@ -210,6 +151,13 @@ class SystemStateViewer:
         self.stream.extrinsics["244622072067"]['X_WC'][:3, 3] += tuned_state['cam1_pos']
         self.stream.extrinsics["244622072067"]['X_WC'][:3, :3] @=  self.rpy_to_matrix(tuned_state['cam1_rot'])
 
+        if self.prev_tuned_state is not None:
+            self.stream.extrinsics["044322073544"]['X_WC'][:3, 3] -= self.prev_tuned_state['cam2_pos']
+            self.stream.extrinsics["044322073544"]['X_WC'][:3, :3] @= self.rpy_to_matrix(self.prev_tuned_state['cam2_rot']).T
+
+        self.stream.extrinsics["044322073544"]['X_WC'][:3, 3] += tuned_state['cam2_pos']
+        self.stream.extrinsics["044322073544"]['X_WC'][:3, :3] @=  self.rpy_to_matrix(tuned_state['cam2_rot'])
+
         self.tuned_joint_offsets = tuned_state['joint_offsets']
         self.prev_tuned_state = tuned_state
 
@@ -227,13 +175,15 @@ class SystemStateViewer:
         robot_pcd_msg = foxglove_pointcloud_from_numpy(np.asarray(robot_pcd_np))
 
         datapoints = self.stream.get_datapoints()
-        scene_pcd = get_fused_point_cloud(datapoints)
+        scene_pcd, pcd_list = get_fused_point_cloud(datapoints)
 
-        pts = np.asarray(scene_pcd.points, dtype=np.float32)
-        cols = np.asarray(np.array(scene_pcd.colors) * 255, dtype=np.uint32) if scene_pcd.has_colors() else None
-        scene_pcd_msg = foxglove_pointcloud_from_numpy(pts, cols)
+        for idx, pcd in enumerate(pcd_list):
+            pts = np.asarray(pcd.points, dtype=np.float32)
+            cols = np.asarray(np.array(pcd.colors) * 255, dtype=np.uint8) if pcd.has_colors() else None
+            pcd_msg = foxglove_pointcloud_from_numpy(pts, cols)
 
-        foxglove.log("/scene_pcd", scene_pcd_msg)
+            foxglove.log(f"/pcd_{idx}", pcd_msg)
+
         foxglove.log("/robot_pcd", robot_pcd_msg)
         foxglove.log(
             "/tf",

@@ -30,7 +30,7 @@ def get_fused_point_cloud(datapoints):
             world coordinate system.
     """
 
-    all_pointclouds = []
+    pc_list = []
     for datapoint in datapoints:
 
         depth = datapoint["depth"].copy()
@@ -84,13 +84,13 @@ def get_fused_point_cloud(datapoints):
         X_WC = datapoint["X_WC"]
 
         pointcloud.transform(X_WC)
-        all_pointclouds.append(pointcloud)
+        pc_list.append(pointcloud)
 
-    final_pointcloud = o3d.geometry.PointCloud()
-    for p in all_pointclouds:
-        final_pointcloud += p
+    merged_pc = o3d.geometry.PointCloud()
+    for p in pc_list:
+        merged_pc += p
 
-    return final_pointcloud
+    return merged_pc, pc_list 
 
 class MultiRealSenseStream:
     def __init__(self, serial_numbers, extrinsics_file):
