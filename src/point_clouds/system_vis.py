@@ -9,6 +9,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import open3d as o3d
 import numpy as np
+import imageio
+import cv2
 
 from urchin import URDF
 from foxglove.schemas import (
@@ -120,6 +122,12 @@ class SystemStateViewer:
         # Start the Foxglove server
         server = foxglove.start_server()
 
+        self.serials = serials
+        self.images = {}
+
+        for serial in serials:
+            self.images[serial] = []
+
     def rpy_to_matrix(self, rpy):
 
         roll, pitch, yaw = rpy
@@ -175,6 +183,10 @@ class SystemStateViewer:
         robot_pcd_msg = foxglove_pointcloud_from_numpy(np.asarray(robot_pcd_np))
 
         datapoints = self.stream.get_datapoints()
+
+        for datapoint in datapoints:
+            self.images[datapoint['serial']].append(np.array(datapoint['color']))
+
         scene_pcd, pcd_list = get_fused_point_cloud(datapoints)
 
         for idx, pcd in enumerate(pcd_list):
@@ -190,6 +202,19 @@ class SystemStateViewer:
             FrameTransforms(transforms=transforms)
         )
 
+    def close(self):
+        for serial in self.serials:
+            frames = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in self.images[serial]]
+
+            imageio.mimsave(
+                f"recording/video_{serial}.mp4",
+                frames,
+                fps=30,
+                codec="libx264"
+            )
+
+        self.stream.stop()
+
 class RobotState:
     RAW_RANGES = {
         'shoulder_pan': [-100, 100],
@@ -199,18 +224,6 @@ class RobotState:
         'wrist_roll': [-100, 100],
         'gripper': [0, 100] 
     }
-
-
-    #TODO These phys ranges need to be calculated from calibration file
-    #PHYS_RANGES = {
-    #    'shoulder_pan': [-1.91986, 1.91986],
-    #    'shoulder_lift': [-1.74533, 1.74533],
-    #    'elbow_flex': [-1.69, 1.69],
-    #    'wrist_flex': [-1.65806, 1.65806],
-    #    'wrist_roll': [-2.74385, 2.84121],
-    #    #'gripper': [6.26722266, 8.46449889]
-    #    'gripper': [-0.174533, 1.74533]
-    #}
 
     def __init__(self, urdf_path, id):
         self.robot_urdf = URDF.load(urdf_path)

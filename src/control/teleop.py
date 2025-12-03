@@ -39,12 +39,14 @@ class TeleopPointCloudSystem:
 
     def run(self):
         """Main loop."""
-        while True:
+        for i in range(100):
+        #while True:
             self.step()
+
+        self.viewer.close()
 
 if __name__ == "__main__":
     system = TeleopPointCloudSystem(
-        urdf_path="calibration/so101_new_calib.urdf",
         serials=["244622072067", "044322073544"],
         extrinsic_json="extrinsic_calibration.json",
     )

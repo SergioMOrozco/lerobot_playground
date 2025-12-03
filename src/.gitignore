@@ -1,2 +1,4 @@
 calibration/calibration_data
 __pycache__/
+models/
+recording/
