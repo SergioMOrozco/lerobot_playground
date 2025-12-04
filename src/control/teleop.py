@@ -12,12 +12,13 @@ class TeleopPointCloudSystem:
 
     def __init__(self,
                  serials,
-                 extrinsic_json):
+                 extrinsic_json,
+                 record):
 
         self.teleop_1 = SO101Leader(SO101LeaderConfig(port="/dev/ttyACM0", id="bender_leader_arm"))
         self.teleop_2 = SO101Leader(SO101LeaderConfig(port="/dev/ttyACM2", id="clamps_leader_arm"))
 
-        self.viewer = SystemStateViewer(serials, extrinsic_json)
+        self.viewer = SystemStateViewer(serials, extrinsic_json, record)
 
     def connect(self):
         print("Connecting devices...")
@@ -46,10 +47,15 @@ class TeleopPointCloudSystem:
         self.viewer.close()
 
 if __name__ == "__main__":
+
+    record = True
+
     system = TeleopPointCloudSystem(
         serials=["244622072067", "044322073544"],
         extrinsic_json="extrinsic_calibration.json",
+        record=record
     )
+
 
     system.connect()
     system.run()   # infinite loop

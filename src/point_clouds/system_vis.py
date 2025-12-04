@@ -89,11 +89,13 @@ def foxglove_pointcloud_from_numpy(points: np.ndarray, colors=None):
     )
 
 class SystemStateViewer:
-    def __init__(self, serials, extrinsic_json, point_size=2.0, tune=True):
+    def __init__(self, serials, extrinsic_json, record, point_size=2.0, tune=True):
 
         self.stream = MultiRealSenseStream(serials, extrinsic_json)
         self.robot_1 = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM1", id="bender_follower_arm"))
         self.robot_2 = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM3", id="clamps_follower_arm"))
+
+        self.record = record
 
         self.prev_tuned_state = None
 
@@ -124,9 +126,11 @@ class SystemStateViewer:
 
         self.serials = serials
         self.images = {}
+        self.depths = {}
 
         for serial in serials:
             self.images[serial] = []
+            self.depths[serial] = []
 
     def rpy_to_matrix(self, rpy):
 
@@ -148,6 +152,22 @@ class SystemStateViewer:
                         [  0,   0, 1]])
 
         return R_z @ R_y @ R_x   # yaw * pitch * roll
+
+    def export_fine_tuning(self):
+        datapoints = self.stream.get_datapoints()
+
+        extrinsics = {}
+
+        for datapoint in datapoints:
+
+            matrix_list = datapoint['X_WC'].tolist()
+
+            extrinsics[datapoint['serial']] = {
+                "X_WC": matrix_list
+            }
+
+        with open("extrinsic_calibration.json", "w") as f:
+            json.dump(extrinsics, f, indent=8)
 
     def tune_state(self):
         tuned_state = self.state_tuner.get_state()
@@ -184,8 +204,10 @@ class SystemStateViewer:
 
         datapoints = self.stream.get_datapoints()
 
-        for datapoint in datapoints:
-            self.images[datapoint['serial']].append(np.array(datapoint['color']))
+        if self.record:
+            for datapoint in datapoints:
+                self.images[datapoint['serial']].append(np.array(datapoint['color']))
+                self.depths[datapoint['serial']].append(np.array(datapoint['depth']))
 
         scene_pcd, pcd_list = get_fused_point_cloud(datapoints)
 
@@ -203,15 +225,25 @@ class SystemStateViewer:
         )
 
     def close(self):
-        for serial in self.serials:
-            frames = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in self.images[serial]]
+        if self.record:
+            for serial in self.serials:
+                frames_rgb = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in self.images[serial]]
+                frames_depth = self.depths[serial]
 
-            imageio.mimsave(
-                f"recording/video_{serial}.mp4",
-                frames,
-                fps=30,
-                codec="libx264"
-            )
+                imageio.mimsave(
+                    f"recording/video_{serial}_rgb.mp4",
+                    frames_rgb,
+                    fps=30,
+                    codec="libx264"
+                )
+
+                np.savez_compressed(f"recording/{serial}_depth.npz", depth=np.array(frames_depth))
+
+        print("export fine tuning? y/n")
+        answer = input()
+
+        if answer == "y":
+            self.export_fine_tuning()
 
         self.stream.stop()
 

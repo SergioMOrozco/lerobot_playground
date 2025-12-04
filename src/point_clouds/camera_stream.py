@@ -10,7 +10,6 @@ import cv2
 import json
 import open3d as o3d
 
-#def get_fused_point_cloud(datapoints: List[Dict[str, Any]], max_depth: float) -> o3d.geometry.PointCloud:
 def get_fused_point_cloud(datapoints):
     """Fuses multiple point clouds from different frames into a single point cloud.
     
@@ -50,8 +49,6 @@ def get_fused_point_cloud(datapoints):
         w = intr.width
         h = intr.height
 
-        #fl_x, fl_y = datapoint["K"][0, 0], datapoint["K"][1, 1]
-        #cx, cy = datapoint["K"][0, 2], datapoint["K"][1, 2]
         intrinsics = o3d.camera.PinholeCameraIntrinsic(w, h, fl_x, fl_y, cx, cy)
         depth_image = o3d.geometry.Image(depth)
 
@@ -80,10 +77,8 @@ def get_fused_point_cloud(datapoints):
             )
 
         pointcloud.points = o3d.utility.Vector3dVector(pointcloud.points)
+        pointcloud.transform(datapoint['X_WC'])
 
-        X_WC = datapoint["X_WC"]
-
-        pointcloud.transform(X_WC)
         pc_list.append(pointcloud)
 
     merged_pc = o3d.geometry.PointCloud()
