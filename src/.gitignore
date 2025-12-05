@@ -1,5 +1,5 @@
 calibration/calibration_data
 __pycache__/
 models/
-recording/
+recordings/
 results_tracking/

@@ -37,7 +37,12 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
 def get_bounding_box():
     return np.array([[-0.01, 0.8], [-0.01, 0.8], [-0.01, 0.8]])  # the world frame robot workspace
 
-def depth2pcd(depth, mask = None):
+def depth2pcd(depth, serial, mask = None):
+
+    #TODO: need to have camera specific calibration
+    if True:
+        assert "Need serial specific calibration."
+
     with open("extrinsic_calibration.json", "r") as f:
         e = json.load(f)
 
@@ -116,11 +121,14 @@ class PostProcessor:
         processor = AutoProcessor.from_pretrained(model_id)
         grounding_model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(device)
 
-        #recordings = ["recording/video_044322073544.mp4", "recording/video_244622072067.mp4"]
-        recordings = ["recording/video_044322073544_rgb.mp4"]
+        recording_dir = "recordings/recording_1"
+        serials = ["044322073544", "244622072067"]
+        #serials = ["244622072067"]
 
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-            for r in recordings:
+            for serial in serials:
+
+                r = os.path.join(recording_dir, serial, "rgb.mp4")
 
                 rgb_frames_full_pil = mp4_to_pil_list(r)
                 rgb_frames_full_np = mp4_to_numpy_list(r)
@@ -222,13 +230,13 @@ class PostProcessor:
                     rgb_frames_chunk_np = rgb_frames_full_np[ann_frame: pivot_frame + seq_len ]
 
                     imageio.mimsave(
-                        f"recording/tmp.mp4",
+                        os.path.join(recording_dir, serial, "tmp.mp4"),
                         rgb_frames_chunk_np,
                         fps=30,
                         codec="libx264"
                     )
 
-                    inference_state = video_predictor.init_state(video_path="recording/tmp.mp4")
+                    inference_state = video_predictor.init_state(video_path=os.path.join(recording_dir, serial, "tmp.mp4"))
 
                     # Using box prompt
                     for object_id, (label, box) in enumerate(zip(objects, input_boxes), start=1):
@@ -283,8 +291,9 @@ class PostProcessor:
                         #    cv2.imwrite("debug.png", annotated_frame)
                         #    cv2.waitKey(100)
 
+                breakpoint()
                 imageio.mimsave(
-                    f"recording/test.mp4",
+                    os.path.join(recording_dir, serial, "mask.mp4"),
                     np.array(mask_video).astype(int) * 255,
                     fps=30,
                     codec="libx264"
@@ -292,13 +301,16 @@ class PostProcessor:
 
     def get_tracking(self):
             cotracker_predictor = CoTrackerPredictor(checkpoint="models/weights/cotracker/scaled_offline.pth", v2=False, offline=True, window_len=60).to('cuda')
-            visualizer = Visualizer(save_dir="results_tracking", pad_value=120, linewidth=3)
 
-            recordings = ["recording/video_044322073544_rgb.mp4"]
-            mask_recordings = ['recording/test.mp4']
-            depth_recordings = ["recording/044322073544_depth.npz"]
+            recording_dir = "recordings/recording_1"
+            serials = ["044322073544", "244622072067"]
 
-            for r, m_r, d_r in zip(recordings, mask_recordings, depth_recordings):
+            for serial in serials:
+                visualizer = Visualizer(save_dir=os.path.join(recording_dir, serial, "results_tracking"), pad_value=120, linewidth=3)
+
+                r = os.path.join(recording_dir, serial, "rgb.mp4")
+                m_r = os.path.join(recording_dir, serial, "mask.mp4")
+                d_r = os.path.join(recording_dir, serial, "depth.npz")
 
                 rgb_frames_full_np = mp4_to_numpy_list(r)
                 mask_frames_full_np = (np.array(mp4_to_numpy_list(m_r))[:, :, :,0] / 255).astype(np.uint8)
@@ -310,7 +322,6 @@ class PostProcessor:
 
                 n_frames = len(rgb_frames_full_np) 
                 pivot_skip = 5
-                #seq_len = 100
                 seq_len = 15
 
                 velocities = []
@@ -473,8 +484,8 @@ class PostProcessor:
                         pred_mask_future_xy[:, 1] = np.clip(pred_mask_future_xy[:, 1], 0, self.W - 1)
 
                         ## extract depth and project to world coordinates
-                        points_now = depth2pcd(depth_now)
-                        points_future = depth2pcd(depth_future)
+                        points_now = depth2pcd(depth_now, serial)
+                        points_future = depth2pcd(depth_future, serial)
 
                         # make it into shape of image
                         points_now = points_now.reshape(depth_now.shape[0], depth_now.shape[1], 3)
@@ -607,36 +618,52 @@ class PostProcessor:
                         #depth_mask_vis = np.logical_and(depth_mask_now, mask_now)
                         #cv2.imwrite(episode_data_dir_cam / "depth_mask" / f"{target_frame:06d}.png", depth_mask_vis * 255)
 
-                np.savez_compressed("recording/velocities.npz", velocities=np.array(velocities))
+                np.savez_compressed(os.path.join(recording_dir, serial, "velocities.npz"), velocities=np.array(velocities))
 
     def get_pcd(self):
 
-        recordings = ["recording/video_044322073544_rgb.mp4"]
-        mask_recordings = ['recording/test.mp4']
-        depth_recordings = ["recording/044322073544_depth.npz"]
-        velocity_recordings = ['recording/velocities.npz']
+        recording_dir = "recordings/recording_1"
+        serials = ["044322073544", "244622072067"]
 
-        for r, m_r, d_r, v_r in zip(recordings, mask_recordings, depth_recordings, velocity_recordings):
+        rgb_frames_full_np = mp4_to_numpy_list(os.path.join(recording_dir, serials[0], "rgb.mp4"))
+        n_frames = len(rgb_frames_full_np)
 
-            rgb_frames_full_np = mp4_to_numpy_list(r)
-            mask_frames_full_np = (np.array(mp4_to_numpy_list(m_r))[:, :, :,0] / 255).astype(np.uint8)
+        pcd_dir = os.path.join(recording_dir, "pcd_clean")
 
-            with np.load(d_r) as data:
-                depth_frames_full_np = data['depth']
+        if os.path.exists(pcd_dir):
+            shutil.rmtree(pcd_dir)
 
-            with np.load(v_r) as data:
-                vel_frames_full_np = data['velocities']
+        os.makedirs(pcd_dir)
 
-            n_frames = len(rgb_frames_full_np) - 5
+        for frame_id in range(n_frames):
 
-            for frame_id in range(n_frames):
+            pts_list = []
+            colors_list = []
+            vels_list = []
+            camera_indices_list = []
+
+            for serial in serials:
+
+                r = os.path.join(recording_dir, serial, "rgb.mp4")
+                m_r = os.path.join(recording_dir, serial, "mask.mp4")
+                d_r = os.path.join(recording_dir, serial, "depth.npz")
+                v_r = os.path.join(recording_dir, serial, "velocities.npz")
+
+                rgb_frames_full_np = mp4_to_numpy_list(r)
+                mask_frames_full_np = (np.array(mp4_to_numpy_list(m_r))[:, :, :,0] / 255).astype(np.uint8)
+
+                with np.load(d_r) as data:
+                    depth_frames_full_np = data['depth']
+
+                with np.load(v_r) as data:
+                    vel_frames_full_np = data['velocities']
 
                 mask = mask_frames_full_np[frame_id]
                 img = rgb_frames_full_np[frame_id]
                 depth = depth_frames_full_np[frame_id] / 1000.0
                 vel = vel_frames_full_np[frame_id]
 
-                points = depth2pcd(depth, mask=mask)
+                points = depth2pcd(depth, serial, mask=mask)
                 points = points.reshape(depth.shape[0], depth.shape[1], 3)
                 points = points[mask > 0]
 
@@ -646,107 +673,112 @@ class PostProcessor:
                 assert points.shape[0] == vel.shape[0]
                 #camera_indices = np.ones(points.shape[0]) * cam
 
-                pts = points
-                colors = colors 
-                vels = vel 
+                pts_list.append(points)
+                colors_list.append(colors)
+                vels_list.append(vel)
+                #camera_indices_list.append(camera_indices)
                 
-                rm_outlier = True
-                if rm_outlier:
-                    #camera_indices = camera_indices[:, None].repeat(9, axis=-1).reshape(pts.shape[0], 3, 3)
-                    pcd = o3d.geometry.PointCloud()
-                    pcd.points = o3d.utility.Vector3dVector(pts)
-                    pcd.colors = o3d.utility.Vector3dVector(colors / 255)
-                    pcd.normals = o3d.utility.Vector3dVector(vels)  # fake normals. just a means to store velocity
-                    #pcd.covariances = o3d.utility.Matrix3dVector(camera_indices) # just a means of storing camera index inside particle
+            pts = np.concatenate(pts_list, axis=0)
+            colors = np.concatenate(colors_list, axis=0)
+            vels = np.concatenate(vels_list, axis=0)
+            #camera_indices = np.concatenate(camera_indices_list)
 
-                    outliers = None
-                    new_outlier = None
-                    rm_iter = 0
-
-                    # iteratively remove outliers
-                    while new_outlier is None or len(new_outlier.points) > 0:
-
-                        # Find each particles nearest 25 neighbors.
-                        # if the mean distance is greater than the global mean plus some extra, we mark it as an outlier
-                        # inlier idx is just particles that are not outliers
-                        _, inlier_idx = pcd.remove_statistical_outlier(
-                            nb_neighbors = 25, std_ratio = 2.0 + rm_iter * 0.5
-                        )
-                        new_pcd = pcd.select_by_index(inlier_idx)
-                        new_outlier = pcd.select_by_index(inlier_idx, invert=True)
-                        if outliers is None:
-                            outliers = new_outlier
-                        else:
-                            outliers += new_outlier
-                        pcd = new_pcd
-                        rm_iter += 1
-                    
-                    pts = np.array(pcd.points)
-                    colors = np.array(pcd.colors)
-                    vels = np.array(pcd.normals)
-                    #camera_indices = np.array(pcd.covariances)[:, 0, 0]
-
-                ### downsample point cloud to 10000
-                if pts.shape[0] > 10000:
-                    downsample_indices = torch.randperm(pts.shape[0])[: 10000]
-                    pts = pts[downsample_indices]
-                    colors = colors[downsample_indices]
-                    vels = vels[downsample_indices]
-                    #camera_indices = camera_indices[downsample_indices]
-
-                n_pts_orig = pts.shape[0]
-
-                # remove outliers based on height
-                pts_z = pts.copy()
-                pts_z[:, :2] = 0  # only consider z axis
-                pcd_z = o3d.geometry.PointCloud()
-                pcd_z.points = o3d.utility.Vector3dVector(pts_z)
-                _, inlier_idx = pcd_z.remove_radius_outlier(
-                    nb_points = 100, radius = 0.02
-                )
-                pts = pts[inlier_idx]
-                colors = colors[inlier_idx]
-                vels = vels[inlier_idx]
-                #camera_indices = camera_indices[inlier_idx]
-
-                # remove outliers based on vel
+            rm_outlier = True
+            if rm_outlier:
+                #camera_indices = camera_indices[:, None].repeat(9, axis=-1).reshape(pts.shape[0], 3, 3)
                 pcd = o3d.geometry.PointCloud()
-                pcd.points = o3d.utility.Vector3dVector(vels)  # fake points
-                _, inlier_idx = pcd.remove_radius_outlier(
-                    nb_points = 20, radius = 0.01
-                )
-                pts = pts[inlier_idx]
-                colors = colors[inlier_idx]
-                vels = vels[inlier_idx]
-                #camera_indices = camera_indices[inlier_idx]
+                pcd.points = o3d.utility.Vector3dVector(pts)
+                pcd.colors = o3d.utility.Vector3dVector(colors / 255)
+                pcd.normals = o3d.utility.Vector3dVector(vels)  # fake normals. just a means to store velocity
+                #pcd.covariances = o3d.utility.Matrix3dVector(camera_indices) # just a means of storing camera index inside particle
 
-                n_pts_clean = pts.shape[0]
+                outliers = None
+                new_outlier = None
+                rm_iter = 0
 
-                knn = NearestNeighbors(n_neighbors=20, algorithm='kd_tree').fit(pts)
-                _, indices = knn.kneighbors(pts) # indices has shape (N,19)
-                indices = indices[:, 1:]  # exclude the point itself
-                dists = np.linalg.norm(pts[indices] - pts[:, None], axis=2) # subtract each point from its 19 neighbors (N,19,3) - (N,1,3) = (N,19)
+                # iteratively remove outliers
+                while new_outlier is None or len(new_outlier.points) > 0:
+
+                    # Find each particles nearest 25 neighbors.
+                    # if the mean distance is greater than the global mean plus some extra, we mark it as an outlier
+                    # inlier idx is just particles that are not outliers
+                    _, inlier_idx = pcd.remove_statistical_outlier(
+                        nb_neighbors = 25, std_ratio = 2.0 + rm_iter * 0.5
+                    )
+                    new_pcd = pcd.select_by_index(inlier_idx)
+                    new_outlier = pcd.select_by_index(inlier_idx, invert=True)
+                    if outliers is None:
+                        outliers = new_outlier
+                    else:
+                        outliers += new_outlier
+                    pcd = new_pcd
+                    rm_iter += 1
                 
-                # convert distances to weights using exponential decay kernel
-                # close neighbors, high weight
-                # far neighbors, low weight
-                weights = np.exp(-dists / 0.01)
-                weights = weights / weights.sum(axis=1, keepdims=True) # normalize weights
-                vels_smooth = (weights[:, :, None] * vels[indices]).sum(axis=1)
-                vels = vels_smooth
+                pts = np.array(pcd.points)
+                colors = np.array(pcd.colors)
+                vels = np.array(pcd.normals)
+                #camera_indices = np.array(pcd.covariances)[:, 0, 0]
 
-                #np.savez_compressed(episode_data_dir / "pcd_clean" / f"{frame_id:06d}.npz", pts=pts, colors=colors, vels=vels, camera_indices=camera_indices)
-                np.savez_compressed(f"recording/pcds/pcd_clean_{frame_id}.npz", pts=pts, colors=colors, vels=vels)
+            ### downsample point cloud to 10000
+            if pts.shape[0] > 10000:
+                downsample_indices = torch.randperm(pts.shape[0])[: 10000]
+                pts = pts[downsample_indices]
+                colors = colors[downsample_indices]
+                vels = vels[downsample_indices]
+                #camera_indices = camera_indices[downsample_indices]
+
+            n_pts_orig = pts.shape[0]
+
+            # remove outliers based on height
+            pts_z = pts.copy()
+            pts_z[:, :2] = 0  # only consider z axis
+            pcd_z = o3d.geometry.PointCloud()
+            pcd_z.points = o3d.utility.Vector3dVector(pts_z)
+            _, inlier_idx = pcd_z.remove_radius_outlier(
+                nb_points = 100, radius = 0.02
+            )
+            pts = pts[inlier_idx]
+            colors = colors[inlier_idx]
+            vels = vels[inlier_idx]
+            #camera_indices = camera_indices[inlier_idx]
+
+            # remove outliers based on vel
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(vels)  # fake points
+            _, inlier_idx = pcd.remove_radius_outlier(
+                nb_points = 20, radius = 0.01
+            )
+            pts = pts[inlier_idx]
+            colors = colors[inlier_idx]
+            vels = vels[inlier_idx]
+            #camera_indices = camera_indices[inlier_idx]
+
+            n_pts_clean = pts.shape[0]
+
+            knn = NearestNeighbors(n_neighbors=20, algorithm='kd_tree').fit(pts)
+            _, indices = knn.kneighbors(pts) # indices has shape (N,19)
+            indices = indices[:, 1:]  # exclude the point itself
+            dists = np.linalg.norm(pts[indices] - pts[:, None], axis=2) # subtract each point from its 19 neighbors (N,19,3) - (N,1,3) = (N,19)
+            
+            # convert distances to weights using exponential decay kernel
+            # close neighbors, high weight
+            # far neighbors, low weight
+            weights = np.exp(-dists / 0.01)
+            weights = weights / weights.sum(axis=1, keepdims=True) # normalize weights
+            vels_smooth = (weights[:, :, None] * vels[indices]).sum(axis=1)
+            vels = vels_smooth
+
+            np.savez_compressed(os.path.join(recording_dir, "pcd_clean", f"{frame_id}.npz"), pts=pts, colors=colors, vels=vels)
 
     def vis_pcd(self):
 
-        pcd_dir = "recording/pcds"
+        pcd_dir = "recordings/recording_1/pcd_clean/"
         n_frames = 100
 
         visualizer = o3d.visualization.Visualizer()
         visualizer.create_window()
 
-        pcd_path = os.path.join(pcd_dir, f"pcd_clean_0.npz")
+        pcd_path = os.path.join(pcd_dir, f"0.npz")
 
         # geometry is the point cloud used in your animaiton
         geometry = o3d.geometry.PointCloud()
@@ -767,7 +799,7 @@ class PostProcessor:
 
         for i in range (1,95):
             for j in range(10):
-                pcd_path = os.path.join(pcd_dir, f"pcd_clean_{i}.npz")
+                pcd_path = os.path.join(pcd_dir, f"{i}.npz")
 
                 # now modify the points of your geometry
                 # you can use whatever method suits you best, this is just an example
@@ -804,7 +836,7 @@ class PostProcessor:
                 print(f"[vis_pcd] Frame {i} done")
 
     def vis_traj(self):
-        pcd_dir = "recording/pcds"
+        pcd_dir = "recordings/recording_1/pcd_clean"
         n_frames = 95
 
         start_frame = 0
@@ -812,7 +844,7 @@ class PostProcessor:
         seq_len = 95
 
         for pivot_frame in range(start_frame, n_frames, pivot_skip):
-            pcd = np.load(os.path.join(pcd_dir, f"pcd_clean_{pivot_frame}.npz"))
+            pcd = np.load(os.path.join(pcd_dir, f"{pivot_frame}.npz"))
             points_0 = pcd['pts']
             colors_0 = pcd['colors']
             vels_0 = pcd['vels']
@@ -823,7 +855,7 @@ class PostProcessor:
             gap = 1
             dt = 1. / 30 * gap
             for frame_id in range(pivot_frame + 1, min(pivot_frame + seq_len, n_frames), gap):
-                pcd = np.load(os.path.join(pcd_dir, f"pcd_clean_{frame_id}.npz"))
+                pcd = np.load(os.path.join(pcd_dir, f"{frame_id}.npz"))
                 points = pcd['pts']
                 vels = pcd['vels']
 
@@ -900,7 +932,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     pp = PostProcessor(args.text_prompts)
-    pp.run_sam2()
+    #pp.run_sam2()
     pp.get_tracking()
     pp.get_pcd()
     pp.vis_pcd()

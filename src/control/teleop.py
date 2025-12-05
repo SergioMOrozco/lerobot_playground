@@ -1,6 +1,7 @@
 # Copyright (c) 2025 Boston Dynamics AI Institute LLC. All rights reserved.
 import os
 import sys
+import argparse
 
 # Add the parent directory to the module search path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -13,12 +14,12 @@ class TeleopPointCloudSystem:
     def __init__(self,
                  serials,
                  extrinsic_json,
-                 record):
+                 recording_name):
 
         self.teleop_1 = SO101Leader(SO101LeaderConfig(port="/dev/ttyACM0", id="bender_leader_arm"))
         self.teleop_2 = SO101Leader(SO101LeaderConfig(port="/dev/ttyACM2", id="clamps_leader_arm"))
 
-        self.viewer = SystemStateViewer(serials, extrinsic_json, record)
+        self.viewer = SystemStateViewer(serials, extrinsic_json, recording_name)
 
     def connect(self):
         print("Connecting devices...")
@@ -52,14 +53,18 @@ class TeleopPointCloudSystem:
 
 if __name__ == "__main__":
 
-    record = True
+    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser.add_argument(
+        "--recording_name", type=str, default="recording_1", help="which config to load"
+    )
+
+    args = parser.parse_args()
 
     system = TeleopPointCloudSystem(
         serials=["244622072067", "044322073544"],
         extrinsic_json="extrinsic_calibration.json",
-        record=record
+        recording_name=args.recording_name
     )
-
 
     system.connect()
     system.run()   # infinite loop

@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import json
+import shutil
 
 # Add the parent directory to the module search path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -89,13 +90,18 @@ def foxglove_pointcloud_from_numpy(points: np.ndarray, colors=None):
     )
 
 class SystemStateViewer:
-    def __init__(self, serials, extrinsic_json, record, point_size=2.0, tune=True):
+    def __init__(self, serials, extrinsic_json, recording_name, point_size=2.0, tune=True):
 
         self.stream = MultiRealSenseStream(serials, extrinsic_json)
         self.robot_1 = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM1", id="bender_follower_arm"))
         self.robot_2 = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM3", id="clamps_follower_arm"))
 
-        self.record = record
+        self.recording_name = recording_name
+
+        if self.recording_name != '':
+            self.record = True
+        else:
+            self.record = False
 
         self.quit=False
 
@@ -231,18 +237,36 @@ class SystemStateViewer:
 
     def close(self):
         if self.record:
+
+            recording_dir = f"recordings/{self.recording_name}"
+
+            # remove task directory if it exists
+            if os.path.exists(recording_dir):
+                shutil.rmtree(recording_dir)
+
+            os.makedirs(recording_dir)
+
             for serial in self.serials:
+
+                serial_dir = os.path.join(recording_dir, f"{serial}" )
+
+                # remove task directory if it exists
+                if os.path.exists(serial_dir):
+                    shutil.rmtree(serial_dir)
+
+                os.makedirs(serial_dir)
+
                 frames_rgb = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in self.images[serial]]
                 frames_depth = self.depths[serial]
 
                 imageio.mimsave(
-                    f"recording/video_{serial}_rgb.mp4",
+                    os.path.join(serial_dir, "rgb.mp4"),
                     frames_rgb,
                     fps=30,
                     codec="libx264"
                 )
 
-                np.savez_compressed(f"recording/{serial}_depth.npz", depth=np.array(frames_depth))
+                np.savez_compressed(os.path.join(serial_dir, "depth.npz"), depth=np.array(frames_depth))
 
         print("export fine tuning? y/n")
         answer = input()
