@@ -37,7 +37,7 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
 def get_bounding_box():
     return np.array([[-0.01, 0.8], [-0.01, 0.8], [-0.01, 0.8]])  # the world frame robot workspace
 
-def depth2pcd(depth):
+def depth2pcd(depth, mask = None):
     with open("extrinsic_calibration.json", "r") as f:
         e = json.load(f)
 
@@ -47,6 +47,9 @@ def depth2pcd(depth):
             extrinsics[serial] = {
                 "X_WC": np.array(data["X_WC"]),
             }
+
+    if mask is not None:
+        depth[mask == 0] = 0.0
 
     fl_x = 607.9873657226562
     fl_y = 608.1102905273438
@@ -87,29 +90,6 @@ def mp4_to_numpy_list(path):
     frames = [np.array(f) for f in reader]   # already RGB
     reader.close()
     return frames
-
-#def chunk_mp4(path, chunk_size):
-#    reader = imageio.get_reader(path)
-#    frames = [np.array(f) for f in reader]   # already RGB
-#    reader.close()
-#
-#    i = 0
-#    chunk_paths = []
-#    for chunk_idx in range(0, len(frames), chunk_size):
-#
-#        chunk_frames = np.array(frames[chunk_idx, chunk_idx + chunk_size])
-#
-#        chunk_path = path + f"chunk_{i}"
-#        chunk_paths.append(chunk_path)
-#
-#        imageio.mimsave(
-#            chunk_path,
-#            np.array(chunk_frames).astype(int) * 255,
-#            fps=30,
-#            codec="libx264"
-#        )
-#
-#    return chunk_paths
 
 class PostProcessor:
 
@@ -521,7 +501,9 @@ class PostProcessor:
                         depth_mask_now_xy = depth_mask_now[pred_mask_now_xy[:, 0], pred_mask_now_xy[:, 1]].reshape(-1)
 
                         # filter out any points that are not visible now or in the future
-                        depth_mask_now_xy = np.logical_and(depth_mask_now_xy > 0, np.logical_and(vis_indices, vis_future_indices))  # filter out invalid points
+                        #TODO: Why would they want to mask out nonvisible tracks? This makes the tracking almost non-functional
+                        #depth_mask_now_xy = np.logical_and(depth_mask_now_xy > 0, np.logical_and(vis_indices, vis_future_indices))  # filter out invalid points
+                        depth_mask_now_xy = depth_mask_now_xy > 0
 
                         # valid pixel points that satisfy:
                         #   - below depth threshold
@@ -627,6 +609,290 @@ class PostProcessor:
 
                 np.savez_compressed("recording/velocities.npz", velocities=np.array(velocities))
 
+    def get_pcd(self):
+
+        recordings = ["recording/video_044322073544_rgb.mp4"]
+        mask_recordings = ['recording/test.mp4']
+        depth_recordings = ["recording/044322073544_depth.npz"]
+        velocity_recordings = ['recording/velocities.npz']
+
+        for r, m_r, d_r, v_r in zip(recordings, mask_recordings, depth_recordings, velocity_recordings):
+
+            rgb_frames_full_np = mp4_to_numpy_list(r)
+            mask_frames_full_np = (np.array(mp4_to_numpy_list(m_r))[:, :, :,0] / 255).astype(np.uint8)
+
+            with np.load(d_r) as data:
+                depth_frames_full_np = data['depth']
+
+            with np.load(v_r) as data:
+                vel_frames_full_np = data['velocities']
+
+            n_frames = len(rgb_frames_full_np) - 5
+
+            for frame_id in range(n_frames):
+
+                mask = mask_frames_full_np[frame_id]
+                img = rgb_frames_full_np[frame_id]
+                depth = depth_frames_full_np[frame_id] / 1000.0
+                vel = vel_frames_full_np[frame_id]
+
+                points = depth2pcd(depth, mask=mask)
+                points = points.reshape(depth.shape[0], depth.shape[1], 3)
+                points = points[mask > 0]
+
+                colors = img[mask > 0]
+                vel = vel[mask > 0]
+
+                assert points.shape[0] == vel.shape[0]
+                #camera_indices = np.ones(points.shape[0]) * cam
+
+                pts = points
+                colors = colors 
+                vels = vel 
+                
+                rm_outlier = True
+                if rm_outlier:
+                    #camera_indices = camera_indices[:, None].repeat(9, axis=-1).reshape(pts.shape[0], 3, 3)
+                    pcd = o3d.geometry.PointCloud()
+                    pcd.points = o3d.utility.Vector3dVector(pts)
+                    pcd.colors = o3d.utility.Vector3dVector(colors / 255)
+                    pcd.normals = o3d.utility.Vector3dVector(vels)  # fake normals. just a means to store velocity
+                    #pcd.covariances = o3d.utility.Matrix3dVector(camera_indices) # just a means of storing camera index inside particle
+
+                    outliers = None
+                    new_outlier = None
+                    rm_iter = 0
+
+                    # iteratively remove outliers
+                    while new_outlier is None or len(new_outlier.points) > 0:
+
+                        # Find each particles nearest 25 neighbors.
+                        # if the mean distance is greater than the global mean plus some extra, we mark it as an outlier
+                        # inlier idx is just particles that are not outliers
+                        _, inlier_idx = pcd.remove_statistical_outlier(
+                            nb_neighbors = 25, std_ratio = 2.0 + rm_iter * 0.5
+                        )
+                        new_pcd = pcd.select_by_index(inlier_idx)
+                        new_outlier = pcd.select_by_index(inlier_idx, invert=True)
+                        if outliers is None:
+                            outliers = new_outlier
+                        else:
+                            outliers += new_outlier
+                        pcd = new_pcd
+                        rm_iter += 1
+                    
+                    pts = np.array(pcd.points)
+                    colors = np.array(pcd.colors)
+                    vels = np.array(pcd.normals)
+                    #camera_indices = np.array(pcd.covariances)[:, 0, 0]
+
+                ### downsample point cloud to 10000
+                if pts.shape[0] > 10000:
+                    downsample_indices = torch.randperm(pts.shape[0])[: 10000]
+                    pts = pts[downsample_indices]
+                    colors = colors[downsample_indices]
+                    vels = vels[downsample_indices]
+                    #camera_indices = camera_indices[downsample_indices]
+
+                n_pts_orig = pts.shape[0]
+
+                # remove outliers based on height
+                pts_z = pts.copy()
+                pts_z[:, :2] = 0  # only consider z axis
+                pcd_z = o3d.geometry.PointCloud()
+                pcd_z.points = o3d.utility.Vector3dVector(pts_z)
+                _, inlier_idx = pcd_z.remove_radius_outlier(
+                    nb_points = 100, radius = 0.02
+                )
+                pts = pts[inlier_idx]
+                colors = colors[inlier_idx]
+                vels = vels[inlier_idx]
+                #camera_indices = camera_indices[inlier_idx]
+
+                # remove outliers based on vel
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(vels)  # fake points
+                _, inlier_idx = pcd.remove_radius_outlier(
+                    nb_points = 20, radius = 0.01
+                )
+                pts = pts[inlier_idx]
+                colors = colors[inlier_idx]
+                vels = vels[inlier_idx]
+                #camera_indices = camera_indices[inlier_idx]
+
+                n_pts_clean = pts.shape[0]
+
+                knn = NearestNeighbors(n_neighbors=20, algorithm='kd_tree').fit(pts)
+                _, indices = knn.kneighbors(pts) # indices has shape (N,19)
+                indices = indices[:, 1:]  # exclude the point itself
+                dists = np.linalg.norm(pts[indices] - pts[:, None], axis=2) # subtract each point from its 19 neighbors (N,19,3) - (N,1,3) = (N,19)
+                
+                # convert distances to weights using exponential decay kernel
+                # close neighbors, high weight
+                # far neighbors, low weight
+                weights = np.exp(-dists / 0.01)
+                weights = weights / weights.sum(axis=1, keepdims=True) # normalize weights
+                vels_smooth = (weights[:, :, None] * vels[indices]).sum(axis=1)
+                vels = vels_smooth
+
+                #np.savez_compressed(episode_data_dir / "pcd_clean" / f"{frame_id:06d}.npz", pts=pts, colors=colors, vels=vels, camera_indices=camera_indices)
+                np.savez_compressed(f"recording/pcds/pcd_clean_{frame_id}.npz", pts=pts, colors=colors, vels=vels)
+
+    def vis_pcd(self):
+
+        pcd_dir = "recording/pcds"
+        n_frames = 100
+
+        visualizer = o3d.visualization.Visualizer()
+        visualizer.create_window()
+
+        pcd_path = os.path.join(pcd_dir, f"pcd_clean_0.npz")
+
+        # geometry is the point cloud used in your animaiton
+        geometry = o3d.geometry.PointCloud()
+        geometry.points = o3d.utility.Vector3dVector(np.load(pcd_path)['pts'])
+        geometry.colors = o3d.utility.Vector3dVector(np.load(pcd_path)['colors'])
+        visualizer.add_geometry(geometry)
+        axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+        visualizer.add_geometry(axis)
+        line_set = o3d.geometry.LineSet()
+        visualizer.add_geometry(line_set)
+
+        # add a tabletop mesh
+        #mesh = o3d.geometry.TriangleMesh.create_box(width=1, height=1, depth=0.01)
+        #mesh = mesh.translate([0, -0.5, 0])
+        #mesh.compute_vertex_normals()
+        #mesh.paint_uniform_color([0.8, 0.8, 0.8])
+        #visualizer.add_geometry(mesh)
+
+        for i in range (1,95):
+            for j in range(10):
+                pcd_path = os.path.join(pcd_dir, f"pcd_clean_{i}.npz")
+
+                # now modify the points of your geometry
+                # you can use whatever method suits you best, this is just an example
+                pcd = np.load(pcd_path)
+                points = pcd['pts']
+                colors = pcd['colors']
+                vels = pcd['vels']
+
+                geometry.points = o3d.utility.Vector3dVector(points)
+                geometry.colors = o3d.utility.Vector3dVector(colors)
+
+                arrow_length = np.linalg.norm(vels, axis=1, keepdims=True)  # Length of each arrow
+
+                # Create endpoint of each arrow by shifting each point in a given direction
+                # Here we assume the direction for each arrow is a unit vector in (0, 0, 1) (upward).
+                directions = vels / np.linalg.norm(vels, axis=1, keepdims=True)
+                end_points = points + arrow_length * directions
+
+                all_points = np.vstack([points, end_points])
+
+                # Create a LineSet to represent arrows
+                lines = [[i, i + len(points)] for i in range(len(points))]
+                colors = [[1, 0, 0] for _ in range(len(lines))]  # Red color for arrows
+
+                # Define the LineSet object
+                line_set.points = o3d.utility.Vector3dVector(all_points)
+                line_set.lines = o3d.utility.Vector2iVector(lines)
+                line_set.colors = o3d.utility.Vector3dVector(colors)
+
+                visualizer.update_geometry(geometry)
+                visualizer.update_geometry(line_set)
+                visualizer.poll_events()
+                visualizer.update_renderer()
+                print(f"[vis_pcd] Frame {i} done")
+
+    def vis_traj(self):
+        pcd_dir = "recording/pcds"
+        n_frames = 95
+
+        start_frame = 0
+        pivot_skip = 95
+        seq_len = 95
+
+        for pivot_frame in range(start_frame, n_frames, pivot_skip):
+            pcd = np.load(os.path.join(pcd_dir, f"pcd_clean_{pivot_frame}.npz"))
+            points_0 = pcd['pts']
+            colors_0 = pcd['colors']
+            vels_0 = pcd['vels']
+
+            points_list = [points_0]
+            vels_list = [vels_0]
+
+            gap = 1
+            dt = 1. / 30 * gap
+            for frame_id in range(pivot_frame + 1, min(pivot_frame + seq_len, n_frames), gap):
+                pcd = np.load(os.path.join(pcd_dir, f"pcd_clean_{frame_id}.npz"))
+                points = pcd['pts']
+                vels = pcd['vels']
+
+                points_pred = points_list[-1] + vels_list[-1] * dt
+
+                # knn
+                knn = NearestNeighbors(n_neighbors=4, algorithm='kd_tree').fit(points)
+                _, indices = knn.kneighbors(points_pred)
+
+                vels_next = vels[indices].mean(axis=1)
+
+                points_list.append(points_pred)
+                vels_list.append(vels_next)
+            
+            points_list = np.stack(points_list, axis=0)
+            vels_list = np.stack(vels_list, axis=0)
+
+            vis = True
+            if vis:
+                visualizer = o3d.visualization.Visualizer()
+                visualizer.create_window()
+
+                # geometry is the point cloud used in your animaiton
+                geometry = o3d.geometry.PointCloud()
+                geometry.points = o3d.utility.Vector3dVector(points_0)
+                geometry.colors = o3d.utility.Vector3dVector(colors_0)
+                visualizer.add_geometry(geometry)
+                axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+                visualizer.add_geometry(axis)
+
+                ## add a tabletop mesh
+                #mesh = o3d.geometry.TriangleMesh.create_box(width=1, height=1, depth=0.01)
+                #mesh = mesh.translate([0, -0.5, 0])
+                #mesh.compute_vertex_normals()
+                #mesh.paint_uniform_color([0.8, 0.8, 0.8])
+                #visualizer.add_geometry(mesh)
+
+                for i in range(len(points_list)):
+                    for j in range(10):
+                        # now modify the points of your geometry
+                        # you can use whatever method suits you best, this is just an example
+                        points = points_list[i]
+                        colors = colors_0
+                        vels = vels_list[i]
+
+                        geometry.points = o3d.utility.Vector3dVector(points)
+                        geometry.colors = o3d.utility.Vector3dVector(colors)
+
+                        arrow_length = np.linalg.norm(vels, axis=1, keepdims=True)  # Length of each arrow
+
+                        # Create endpoint of each arrow by shifting each point in a given direction
+                        # Here we assume the direction for each arrow is a unit vector in (0, 0, 1) (upward).
+                        directions = vels / np.linalg.norm(vels, axis=1, keepdims=True)
+                        end_points = points + arrow_length * directions
+
+                        all_points = np.vstack([points, end_points])
+
+                        # Create a LineSet to represent arrows
+                        lines = [[i, i + len(points)] for i in range(len(points))]
+                        colors = [[1, 0, 0] for _ in range(len(lines))]  # Red color for arrows
+
+                        visualizer.update_geometry(geometry)
+                        visualizer.poll_events()
+                        visualizer.update_renderer()
+                        print(f"[pred_traj] Frame {i} done")
+            
+                visualizer.destroy_window()
+                input("Press Enter to continue...")
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
@@ -635,6 +901,8 @@ if __name__ == '__main__':
 
     pp = PostProcessor(args.text_prompts)
     #pp.run_sam2()
-    pp.get_tracking()
+    #pp.get_tracking()
     #pp.get_pcd()
+    #pp.vis_pcd()
+    pp.vis_traj()
     #pp.get_sub_episodes()
