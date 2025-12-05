@@ -42,6 +42,10 @@ class TeleopPointCloudSystem:
         """Main loop."""
         for i in range(100):
         #while True:
+
+            if self.viewer.quit:
+                break
+
             self.step()
 
         self.viewer.close()

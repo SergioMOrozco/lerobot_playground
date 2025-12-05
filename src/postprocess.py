@@ -900,9 +900,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     pp = PostProcessor(args.text_prompts)
-    #pp.run_sam2()
-    #pp.get_tracking()
-    #pp.get_pcd()
-    #pp.vis_pcd()
+    pp.run_sam2()
+    pp.get_tracking()
+    pp.get_pcd()
+    pp.vis_pcd()
     pp.vis_traj()
     #pp.get_sub_episodes()

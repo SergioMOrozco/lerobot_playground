@@ -97,6 +97,8 @@ class SystemStateViewer:
 
         self.record = record
 
+        self.quit=False
+
         self.prev_tuned_state = None
 
         if tune:
@@ -190,6 +192,9 @@ class SystemStateViewer:
         self.prev_tuned_state = tuned_state
 
     def update(self, action_1, action_2):
+
+        if self.state_tuner.quit is True:
+            self.quit = True
 
         self.tune_state()
 

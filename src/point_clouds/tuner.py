@@ -26,6 +26,9 @@ class StateValues:
 class StateTuner:
     """Runs Tkinter GUI in a background thread, providing live parameter tuning."""
     def __init__(self, joint_names=None):
+
+        self.quit = False
+
         if joint_names is None:
             joint_names = []
 
@@ -63,7 +66,14 @@ class StateTuner:
         notebook.add(self._make_camera_frame("Camera 2", "cam2"), text="Camera 2")
         notebook.add(self._make_joint_frame(), text="Joints")
 
+        # --- Quit Button ---
+        quit_button = ttk.Button(self.root, text="Quit", command=self._quit_gui)
+        quit_button.pack(pady=10)
+
         self.root.mainloop()
+
+    def _quit_gui(self):
+        self.quit = True
 
     # ---------------------------------------------------------
     # GUI Components
