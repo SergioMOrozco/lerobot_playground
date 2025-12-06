@@ -268,6 +268,27 @@ class SystemStateViewer:
 
                 np.savez_compressed(os.path.join(serial_dir, "depth.npz"), depth=np.array(frames_depth))
 
+        if not os.path.exists("intrinsic_calibration.json"):
+            datapoints = self.stream.get_datapoints()
+
+            for datapoint in datapoints:
+
+                intr = datapoint["color_intrinsics"]
+
+                intrinsics = {}
+
+                for datapoint in datapoints:
+                    intrinsics[datapoint['serial']] = {}
+                    intrinsics[datapoint['serial']]['fl_x'] = intr.fx
+                    intrinsics[datapoint['serial']]['fl_y'] = intr.fy
+                    intrinsics[datapoint['serial']]['cx'] = intr.ppx
+                    intrinsics[datapoint['serial']]['cy'] = intr.ppy
+                    intrinsics[datapoint['serial']]['w'] = datapoint['color'].shape[1]
+                    intrinsics[datapoint['serial']]['h'] = datapoint['color'].shape[0]
+
+            with open("intrinsic_calibration.json", "w") as f:
+                json.dump(intrinsics, f, indent=8)
+
         print("export fine tuning? y/n")
         answer = input()
 

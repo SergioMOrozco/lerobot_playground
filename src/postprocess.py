@@ -39,29 +39,24 @@ def get_bounding_box():
 
 def depth2pcd(depth, serial, mask = None):
 
-    #TODO: need to have camera specific calibration
     if True:
         assert "Need serial specific calibration."
 
     with open("extrinsic_calibration.json", "r") as f:
-        e = json.load(f)
+        extrinsics = json.load(f)
 
-        extrinsics = {}
-
-        for serial, data in e.items():
-            extrinsics[serial] = {
-                "X_WC": np.array(data["X_WC"]),
-            }
+    with open("intrinsic_calibration.json", "r") as f:
+        intrinsics = json.load(f)
 
     if mask is not None:
         depth[mask == 0] = 0.0
 
-    fl_x = 607.9873657226562
-    fl_y = 608.1102905273438
-    cx = 317.81854248046875 
-    cy = 230.1835479736328 
-    w = 640 
-    h = 480
+    fl_x = intrinsics[serial]['fl_x']
+    fl_y = intrinsics[serial]['fl_y']
+    cx = intrinsics[serial]['cx']
+    cy = intrinsics[serial]['cy']
+    w = intrinsics[serial]['w']
+    h = intrinsics[serial]['h']
 
     intrinsics = o3d.camera.PinholeCameraIntrinsic(w, h, fl_x, fl_y, cx, cy)
 
@@ -77,7 +72,7 @@ def depth2pcd(depth, serial, mask = None):
         depth_scale=1.0,
     )
 
-    pointcloud.transform(extrinsics['044322073544']['X_WC'])
+    pointcloud.transform(extrinsics[serial]['X_WC'])
 
     return np.array(pointcloud.points)
 
@@ -123,7 +118,6 @@ class PostProcessor:
 
         recording_dir = "recordings/recording_1"
         serials = ["044322073544", "244622072067"]
-        #serials = ["244622072067"]
 
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
             for serial in serials:
@@ -291,7 +285,6 @@ class PostProcessor:
                         #    cv2.imwrite("debug.png", annotated_frame)
                         #    cv2.waitKey(100)
 
-                breakpoint()
                 imageio.mimsave(
                     os.path.join(recording_dir, serial, "mask.mp4"),
                     np.array(mask_video).astype(int) * 255,
@@ -626,7 +619,8 @@ class PostProcessor:
         serials = ["044322073544", "244622072067"]
 
         rgb_frames_full_np = mp4_to_numpy_list(os.path.join(recording_dir, serials[0], "rgb.mp4"))
-        n_frames = len(rgb_frames_full_np)
+        #n_frames = len(rgb_frames_full_np) - 5
+        n_frames = 20
 
         pcd_dir = os.path.join(recording_dir, "pcd_clean")
 
@@ -837,7 +831,8 @@ class PostProcessor:
 
     def vis_traj(self):
         pcd_dir = "recordings/recording_1/pcd_clean"
-        n_frames = 95
+        #n_frames = 95
+        n_frames = 20
 
         start_frame = 0
         pivot_skip = 95
@@ -933,8 +928,8 @@ if __name__ == '__main__':
 
     pp = PostProcessor(args.text_prompts)
     #pp.run_sam2()
-    pp.get_tracking()
-    pp.get_pcd()
-    pp.vis_pcd()
+    #pp.get_tracking()
+    #pp.get_pcd()
+    #pp.vis_pcd()
     pp.vis_traj()
     #pp.get_sub_episodes()

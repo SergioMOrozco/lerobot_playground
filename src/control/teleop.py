@@ -41,8 +41,8 @@ class TeleopPointCloudSystem:
 
     def run(self):
         """Main loop."""
-        for i in range(100):
-        #while True:
+        while True:
+        #for i in range(100):
 
             if self.viewer.quit:
                 break
@@ -55,7 +55,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Process some integers.")
     parser.add_argument(
-        "--recording_name", type=str, default="recording_1", help="which config to load"
+        "--recording_name", type=str, default="", help="which config to load"
     )
 
     args = parser.parse_args()
