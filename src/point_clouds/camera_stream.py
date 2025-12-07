@@ -193,7 +193,7 @@ if __name__ == "__main__":
     stream = MultiRealSenseStream(serials, "extrinsic_calibration.json")
     pcd_viewer = LivePointCloudViewer()
 
-    while True:
+    for i in range(1000):
         datapoints = stream.get_datapoints()
         fused,_ = get_fused_point_cloud(datapoints)
 
