@@ -2,6 +2,8 @@
 import os
 import sys
 import argparse
+import cv2
+import numpy as np
 
 # Add the parent directory to the module search path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -27,27 +29,48 @@ class TeleopPointCloudSystem:
         self.teleop_2.connect()
         print("Connected.")
 
-    def step(self):
-        """Perform one full teleop + pointcloud + FK step."""
-
-        # ---- TELEOP 1 ----
-        action_1 = self.teleop_1.get_action()
-
-        # ---- TELEOP 2 ----
-        action_2 = self.teleop_2.get_action()
-
-        self.viewer.update(action_1, action_2)
-
-
-    def run(self):
+    def run(self, calibrate= False, serial_calibrate=None):
         """Main loop."""
+
+        num = 0
+
+        base_to_gripper_transforms = []
+
         while True:
-        #for i in range(100):
 
             if self.viewer.quit:
                 break
 
-            self.step()
+            # ---- TELEOP 1 ----
+            action_1 = self.teleop_1.get_action()
+
+            # ---- TELEOP 2 ----
+            action_2 = self.teleop_2.get_action()
+
+            self.viewer.update(action_1, action_2)
+
+            if calibrate and self.viewer.state_tuner.capture:
+
+                self.viewer.state_tuner.capture = False
+
+                base2gripper_T = self.viewer.robot_state.get_eef_pos(self.viewer.robot_1.get_observation(), self.viewer.tuned_joint_offsets)
+                datapoints = self.viewer.stream.get_datapoints()
+
+                for datapoint in datapoints:
+                    if datapoint['serial'] == serial_calibrate:
+
+                        if not os.path.exists(f"calibration/calibration_data/images/{datapoint['serial']}"):
+                            os.makedirs(f"calibration/calibration_data/images/{datapoint['serial']}")
+
+                        cv2.imwrite(f"calibration/calibration_data/images/{datapoint['serial']}/{num}.png", datapoint['color'])
+                        print("image saved!")
+
+                num += 1
+
+                base_to_gripper_transforms.append(base2gripper_T)
+
+        if calibrate:
+            np.save('calibration/calibration_data/base_to_gripper_transform.npy', np.array(base_to_gripper_transforms))
 
         self.viewer.close()
 
@@ -66,5 +89,8 @@ if __name__ == "__main__":
         recording_name=args.recording_name
     )
 
+    calibrate = False
+    serial_calibrate = "244622072067"
+
     system.connect()
-    system.run()   # infinite loop
+    system.run(calibrate, serial_calibrate)   # infinite loop

@@ -209,11 +209,38 @@ class SystemStateViewer:
 
         obs = self.robot_1.get_observation()
 
+
         transforms, robot_pcd_np = self.robot_state.get_transforms(obs, self.tuned_joint_offsets)
         robot_pcd_np = robot_pcd_np.reshape(robot_pcd_np.shape[0] * robot_pcd_np.shape[1], 3)
         robot_pcd_msg = foxglove_pointcloud_from_numpy(np.asarray(robot_pcd_np))
 
+
         datapoints = self.stream.get_datapoints()
+
+        if self.state_tuner.capture:
+            self.state_tuner.capture = False
+
+            calibration_dir = "calibration_files"
+
+            # remove task directory if it exists
+            if os.path.exists(calibration_dir):
+                shutil.rmtree(calibration_dir)
+
+            os.makedirs(calibration_dir)
+
+            for datapoint in datapoints:
+
+                serial_dir = os.path.join(calibration_dir, datapoint['serial'])
+
+                # remove task directory if it exists
+                if os.path.exists(serial_dir):
+                    shutil.rmtree(serial_dir)
+
+                os.makedirs(serial_dir)
+
+                cv2.imwrite(os.path.join(serial_dir, "color.png"), datapoint['color'])
+                np.savez_compressed(os.path.join(serial_dir, "depth.npz"), depth=np.array(datapoint['depth']))
+                np.savez_compressed(os.path.join(calibration_dir, "robot_pcd.npz"), pcd=np.array(robot_pcd_np))
 
         if self.record:
             for datapoint in datapoints:
@@ -271,20 +298,18 @@ class SystemStateViewer:
         if not os.path.exists("intrinsic_calibration.json"):
             datapoints = self.stream.get_datapoints()
 
+            intrinsics = {}
             for datapoint in datapoints:
 
                 intr = datapoint["color_intrinsics"]
 
-                intrinsics = {}
-
-                for datapoint in datapoints:
-                    intrinsics[datapoint['serial']] = {}
-                    intrinsics[datapoint['serial']]['fl_x'] = intr.fx
-                    intrinsics[datapoint['serial']]['fl_y'] = intr.fy
-                    intrinsics[datapoint['serial']]['cx'] = intr.ppx
-                    intrinsics[datapoint['serial']]['cy'] = intr.ppy
-                    intrinsics[datapoint['serial']]['w'] = datapoint['color'].shape[1]
-                    intrinsics[datapoint['serial']]['h'] = datapoint['color'].shape[0]
+                intrinsics[datapoint['serial']] = {}
+                intrinsics[datapoint['serial']]['fl_x'] = intr.fx
+                intrinsics[datapoint['serial']]['fl_y'] = intr.fy
+                intrinsics[datapoint['serial']]['cx'] = intr.ppx
+                intrinsics[datapoint['serial']]['cy'] = intr.ppy
+                intrinsics[datapoint['serial']]['w'] = datapoint['color'].shape[1]
+                intrinsics[datapoint['serial']]['h'] = datapoint['color'].shape[0]
 
             with open("intrinsic_calibration.json", "w") as f:
                 json.dump(intrinsics, f, indent=8)
@@ -439,6 +464,12 @@ class RobotState:
                 robot_pts.append((R1 @ pts_visual.T).T + t1)
 
         return np.array(robot_pts)
+
+    def get_eef_pos(self, obs, tuned_joint_offsets):
+
+        joint_positions = self.get_joint_positions(obs, tuned_joint_offsets)
+
+        return self.robot_urdf.link_fk(cfg=joint_positions)[self.robot_urdf.link_map["gripper_frame_link"]]
 
     def get_transforms(self, obs, tuned_joint_offsets):
 

@@ -9,6 +9,7 @@ import numpy as np
 import cv2
 import json
 import open3d as o3d
+from point_clouds.point_cloud_viewer import LivePointCloudViewer
 
 def get_fused_point_cloud(datapoints):
     """Fuses multiple point clouds from different frames into a single point cloud.
@@ -33,12 +34,10 @@ def get_fused_point_cloud(datapoints):
     for datapoint in datapoints:
 
         depth = datapoint["depth"].copy()
+        depth = np.ascontiguousarray(depth.astype(np.float32))
 
         if datapoint["obj_mask"] is not None:
             depth[datapoint["obj_mask"] == 0] = 0.0
-
-        w = depth.shape[1]
-        h = depth.shape[0]
 
         intr = datapoint["color_intrinsics"]  # added by your stream class
 
@@ -76,7 +75,6 @@ def get_fused_point_cloud(datapoints):
                 depth_trunc=datapoint['max_depth'],
             )
 
-        pointcloud.points = o3d.utility.Vector3dVector(pointcloud.points)
         pointcloud.transform(datapoint['X_WC'])
 
         pc_list.append(pointcloud)
@@ -190,16 +188,16 @@ class MultiRealSenseStream:
         for pipeline in self.pipelines.values():
             pipeline.stop()
 
-#if __name__ == "__main__":
-#    #serials = ["244622072067"]
-#    serials = ["044322073544"]
-#    stream = MultiRealSenseStream(serials, "extrinsic_calibration.json", "intrinsic_calibration.json")
-#    pcd_viewer = LivePointCloudViewer()
-#
-#    while True:
-#        datapoints = stream.get_datapoints()
-#        fused = get_fused_point_cloud(datapoints)
-#        # Convert to numpy
-#        pts = np.asarray(fused.points)
-#        cols = np.asarray(fused.colors) if fused.has_colors() else None
-#        pcd_viewer.update(pts, cols)
+if __name__ == "__main__":
+    serials = ["244622072067", "044322073544"]
+    stream = MultiRealSenseStream(serials, "extrinsic_calibration.json")
+    pcd_viewer = LivePointCloudViewer()
+
+    while True:
+        datapoints = stream.get_datapoints()
+        fused,_ = get_fused_point_cloud(datapoints)
+
+        # Convert to numpy
+        pts = np.asarray(fused.points)
+        cols = np.asarray(fused.colors) if fused.has_colors() else None
+        pcd_viewer.update(pts, cols)

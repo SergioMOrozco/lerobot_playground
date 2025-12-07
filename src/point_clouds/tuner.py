@@ -28,6 +28,7 @@ class StateTuner:
     def __init__(self, joint_names=None):
 
         self.quit = False
+        self.capture = False
 
         if joint_names is None:
             joint_names = []
@@ -70,10 +71,17 @@ class StateTuner:
         quit_button = ttk.Button(self.root, text="Quit", command=self._quit_gui)
         quit_button.pack(pady=10)
 
+        # --- capture Button ---
+        capture_button = ttk.Button(self.root, text="Capture", command=self._capture)
+        capture_button.pack(pady=10)
+
         self.root.mainloop()
 
     def _quit_gui(self):
         self.quit = True
+
+    def _capture(self):
+        self.capture = True
 
     # ---------------------------------------------------------
     # GUI Components
