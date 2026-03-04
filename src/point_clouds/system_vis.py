@@ -14,6 +14,7 @@ import imageio
 import cv2
 
 from urchin import URDF
+import foxglove
 from foxglove.schemas import (
     RawImage,
     FrameTransforms,
@@ -93,8 +94,8 @@ class SystemStateViewer:
     def __init__(self, serials, extrinsic_json, recording_name, point_size=2.0, tune=True):
 
         self.stream = MultiRealSenseStream(serials, extrinsic_json)
-        self.robot_1 = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM1", id="bender_follower_arm"))
-        self.robot_2 = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM3", id="clamps_follower_arm"))
+        self.robot_1 = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM3", id="bender_follower_arm"))
+        self.robot_2 = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM2", id="clamps_follower_arm"))
 
         self.recording_name = recording_name
 
@@ -198,6 +199,7 @@ class SystemStateViewer:
         self.prev_tuned_state = tuned_state
 
     def update(self, action_1, action_2):
+        # actions are simply joint states
 
         if self.state_tuner.quit is True:
             self.quit = True
@@ -209,8 +211,8 @@ class SystemStateViewer:
 
         obs = self.robot_1.get_observation()
 
-
-        transforms, robot_pcd_np = self.robot_state.get_transforms(obs, self.tuned_joint_offsets)
+        #transforms, robot_pcd_np = self.robot_state.get_transforms(obs, self.tuned_joint_offsets)
+        transforms, robot_pcd_np = self.robot_state.get_transforms(obs, action_1)
         robot_pcd_np = robot_pcd_np.reshape(robot_pcd_np.shape[0] * robot_pcd_np.shape[1], 3)
         robot_pcd_msg = foxglove_pointcloud_from_numpy(np.asarray(robot_pcd_np))
 
@@ -322,15 +324,27 @@ class SystemStateViewer:
 
         self.stream.stop()
 
+# joint limit written in USD (degree)
+SO101_FOLLOWER_USD_JOINT_LIMLITS = {
+    "shoulder_pan.pos": (-110.0, 110.0),
+    "shoulder_lift.pos": (-100.0, 100.0),
+    "elbow_flex.pos": (-100.0, 90.0),
+    "wrist_flex.pos": (-95.0, 95.0),
+    "wrist_roll.pos": (-160.0, 160.0),
+    "gripper.pos": (-10, 100.0),
+}
+
+# motor limit written in real device (normalized to related range)
+SO101_FOLLOWER_MOTOR_LIMITS = {
+    "shoulder_pan.pos": (-100.0, 100.0),
+    "shoulder_lift.pos": (-100.0, 100.0),
+    "elbow_flex.pos": (-100.0, 100.0),
+    "wrist_flex.pos": (-100.0, 100.0),
+    "wrist_roll.pos": (-100.0, 100.0),
+    "gripper.pos": (0.0, 100.0),
+}
+
 class RobotState:
-    RAW_RANGES = {
-        'shoulder_pan': [-100, 100],
-        'shoulder_lift': [-100, 100],
-        'elbow_flex': [-100, 100],
-        'wrist_flex': [-100, 100],
-        'wrist_roll': [-100, 100],
-        'gripper': [0, 100] 
-    }
 
     def __init__(self, urdf_path, id):
         self.robot_urdf = URDF.load(urdf_path)
@@ -398,23 +412,6 @@ class RobotState:
                 z = 0.25 * s
         return np.array([x, y, z, w], dtype=np.float64)
 
-    def map_joint_value(self, raw, raw_range, phys_range):
-        return phys_range[0] + (raw - raw_range[0]) / (raw_range[1] - raw_range[0]) * (phys_range[1] - phys_range[0])
-
-    def get_joint_positions(self, obs, tuned_joint_offsets):
-        """Map raw teleop values to physical joint angles."""
-
-        if tuned_joint_offsets is None:
-            return {
-                j: self.map_joint_value(obs[f"{j}.pos"], self.RAW_RANGES[j], self.PHYS_RANGES[j])
-                for j in self.RAW_RANGES
-            }
-        else:
-            return {
-                j: self.map_joint_value(obs[f"{j}.pos"], self.RAW_RANGES[j], self.PHYS_RANGES[j]) + tuned_joint_offsets[f"{j}"]
-                for j in self.RAW_RANGES
-            }
-
     def load_robot_meshes(self):
         """Load and sample all robot meshes upfront."""
         for link in self.robot_urdf.links:
@@ -431,11 +428,32 @@ class RobotState:
 
                 self.robot_meshes_o3d[(link.name, mesh_path)] = mesh_o3d
 
+    def convert_lerobot_action_to_radians(self, joint_state):
+        """
+        Convert the action from Lerobot to LeIsaac. Just convert value, not include the format.
+        """
+
+        processed_action = np.zeros(6)
+        joint_limits = SO101_FOLLOWER_USD_JOINT_LIMLITS
+        motor_limits = SO101_FOLLOWER_MOTOR_LIMITS
+
+        for idx, joint_name in enumerate(joint_limits):
+            motor_limit_range = motor_limits[joint_name]
+            joint_limit_range = joint_limits[joint_name]
+            motor_range = motor_limit_range[1] - motor_limit_range[0]
+            joint_range = joint_limit_range[1] - joint_limit_range[0]
+            motor_degree = joint_state[joint_name] - motor_limit_range[0]
+            processed_degree = motor_degree / motor_range * joint_range + joint_limit_range[0]
+            processed_radius = processed_degree / 180.0 * np.pi  # convert to radian
+            processed_action[idx] = processed_radius
+
+        return processed_action
+
     def sample_robot_points(self, obs, tuned_joint_offsets):
         """Return sampled + transformed robot points for both arms."""
         robot_pts = []
 
-        joint_positions = self.get_joint_positions(obs, tuned_joint_offsets)
+        joint_positions = self.convert_lerobot_action_to_radians(obs)
 
         for link in self.robot_urdf.links:
             visuals = link.visuals
@@ -475,7 +493,7 @@ class RobotState:
 
         transforms = []
 
-        joint_positions = self.get_joint_positions(obs, tuned_joint_offsets)
+        joint_positions = self.convert_lerobot_action_to_radians(obs)
 
         # Compute forward kinematics with updated joint positions
         fk_poses = self.robot_urdf.link_fk(cfg=joint_positions)

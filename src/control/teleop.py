@@ -19,7 +19,7 @@ class TeleopPointCloudSystem:
                  recording_name):
 
         self.teleop_1 = SO101Leader(SO101LeaderConfig(port="/dev/ttyACM0", id="bender_leader_arm"))
-        self.teleop_2 = SO101Leader(SO101LeaderConfig(port="/dev/ttyACM2", id="clamps_leader_arm"))
+        self.teleop_2 = SO101Leader(SO101LeaderConfig(port="/dev/ttyACM1", id="clamps_leader_arm"))
 
         self.viewer = SystemStateViewer(serials, extrinsic_json, recording_name)
 
@@ -37,6 +37,7 @@ class TeleopPointCloudSystem:
         base_to_gripper_transforms = []
 
         while True:
+        #for i in range(100):
 
             if self.viewer.quit:
                 break

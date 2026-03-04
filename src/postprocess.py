@@ -619,8 +619,8 @@ class PostProcessor:
         serials = ["044322073544", "244622072067"]
 
         rgb_frames_full_np = mp4_to_numpy_list(os.path.join(recording_dir, serials[0], "rgb.mp4"))
-        #n_frames = len(rgb_frames_full_np) - 5
-        n_frames = 20
+        n_frames = len(rgb_frames_full_np) - 5
+        #n_frames = 95
 
         pcd_dir = os.path.join(recording_dir, "pcd_clean")
 
@@ -767,7 +767,7 @@ class PostProcessor:
     def vis_pcd(self):
 
         pcd_dir = "recordings/recording_1/pcd_clean/"
-        n_frames = 100
+        n_frames = 95
 
         visualizer = o3d.visualization.Visualizer()
         visualizer.create_window()
@@ -831,8 +831,8 @@ class PostProcessor:
 
     def vis_traj(self):
         pcd_dir = "recordings/recording_1/pcd_clean"
-        #n_frames = 95
-        n_frames = 20
+        n_frames = 95
+        #n_frames = 20
 
         start_frame = 0
         pivot_skip = 95
