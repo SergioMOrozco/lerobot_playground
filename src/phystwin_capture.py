@@ -80,7 +80,7 @@ def main():
     )
     parser.add_argument("--num_frames", type=int, default=116)
     parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument("--width", type=int, default=640)
+    parser.add_argument("--width", type=int, default=848)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument(
         "--align_depth_to_color",

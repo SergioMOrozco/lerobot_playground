@@ -34,6 +34,182 @@ from cotracker.utils.visualizer import Visualizer
 from sam2.build_sam import build_sam2, build_sam2_video_predictor
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 
+
+import matplotlib.pyplot as plt
+
+import cv2
+import numpy as np
+
+def select_bounding_box_by_click_matplotlib(image_pil, input_boxes, labels):
+    """
+    Click a bounding box to select it.
+
+    Returns:
+        selected_box: shape (1, 4)
+        selected_label: list[str] length 1
+        selected_idx: int
+    """
+    image = np.array(image_pil)
+    selected_idx = {"value": None}
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    ax.imshow(image)
+    ax.set_title("Click a bounding box to select it, then close the window")
+
+    for i, (box, label) in enumerate(zip(input_boxes, labels)):
+        x1, y1, x2, y2 = box
+        w, h = x2 - x1, y2 - y1
+        rect = plt.Rectangle((x1, y1), w, h, fill=False, edgecolor="red", linewidth=2)
+        ax.add_patch(rect)
+        ax.text(
+            x1,
+            max(y1 - 5, 5),
+            f"{i}: {label}",
+            color="yellow",
+            fontsize=10,
+            bbox=dict(facecolor="black", alpha=0.6, pad=2),
+        )
+
+    def point_in_box(x, y, box):
+        x1, y1, x2, y2 = box
+        return x1 <= x <= x2 and y1 <= y <= y2
+
+    def onclick(event):
+        if event.xdata is None or event.ydata is None:
+            return
+
+        x, y = event.xdata, event.ydata
+
+        containing = []
+        for i, box in enumerate(input_boxes):
+            if point_in_box(x, y, box):
+                area = (box[2] - box[0]) * (box[3] - box[1])
+                containing.append((area, i))
+
+        if containing:
+            containing.sort()
+            selected_idx["value"] = containing[0][1]
+            print(f"Selected box {selected_idx['value']}: {labels[selected_idx['value']]}")
+            plt.close(fig)
+        else:
+            print("Click inside one of the boxes.")
+
+    cid = fig.canvas.mpl_connect("button_press_event", onclick)
+    plt.show()
+    fig.canvas.mpl_disconnect(cid)
+
+    if selected_idx["value"] is None:
+        raise RuntimeError("No bounding box selected.")
+
+    idx = selected_idx["value"]
+    return input_boxes[idx:idx+1], [labels[idx]], idx
+
+
+def select_bounding_box_by_click(image_pil, input_boxes, labels, window_name="Select Box"):
+    """
+    Let the user click one of the candidate bounding boxes.
+
+    Args:
+        image_pil: PIL image
+        input_boxes: numpy array of shape (N, 4) in xyxy format
+        labels: list of length N
+
+    Returns:
+        selected_box: numpy array of shape (1, 4)
+        selected_label: list with one label
+        selected_idx: int
+    """
+    image = np.array(image_pil).copy()
+    image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    selected_idx = {"value": None}
+    click_pt = {"value": None}
+
+    def draw_boxes(img, highlight_idx=None):
+        disp = img.copy()
+        for i, (box, label) in enumerate(zip(input_boxes, labels)):
+            x1, y1, x2, y2 = map(int, box.tolist())
+
+            color = (0, 255, 0) if i == highlight_idx else (0, 0, 255)
+            thickness = 3 if i == highlight_idx else 2
+
+            cv2.rectangle(disp, (x1, y1), (x2, y2), color, thickness)
+            text = f"{i}: {label}"
+            cv2.putText(
+                disp,
+                text,
+                (x1, max(y1 - 10, 20)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                color,
+                2,
+                cv2.LINE_AA,
+            )
+        return disp
+
+    def point_in_box(x, y, box):
+        x1, y1, x2, y2 = box
+        return x1 <= x <= x2 and y1 <= y <= y2
+
+    def mouse_callback(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            click_pt["value"] = (x, y)
+
+            # First prefer boxes containing the click
+            containing = []
+            for i, box in enumerate(input_boxes):
+                if point_in_box(x, y, box):
+                    area = (box[2] - box[0]) * (box[3] - box[1])
+                    containing.append((area, i))
+
+            if len(containing) > 0:
+                # choose smallest containing box
+                containing.sort()
+                selected_idx["value"] = containing[0][1]
+            else:
+                # if click is outside all boxes, choose nearest box center
+                dists = []
+                for i, box in enumerate(input_boxes):
+                    cx = 0.5 * (box[0] + box[2])
+                    cy = 0.5 * (box[1] + box[3])
+                    d = (cx - x) ** 2 + (cy - y) ** 2
+                    dists.append((d, i))
+                dists.sort()
+                selected_idx["value"] = dists[0][1]
+
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback(window_name, mouse_callback)
+
+    while True:
+        disp = draw_boxes(image_bgr, selected_idx["value"])
+        cv2.putText(
+            disp,
+            "Click a box. Press ENTER/SPACE to confirm, ESC to cancel.",
+            (20, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (255, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.imshow(window_name, disp)
+        key = cv2.waitKey(20) & 0xFF
+
+        if key in [13, 32]:  # Enter or Space
+            if selected_idx["value"] is not None:
+                break
+        elif key == 27:  # ESC
+            cv2.destroyWindow(window_name)
+            raise RuntimeError("User cancelled bounding box selection.")
+
+    cv2.destroyWindow(window_name)
+
+    idx = selected_idx["value"]
+    selected_box = input_boxes[idx:idx + 1]
+    selected_label = [labels[idx]]
+
+    return selected_box, selected_label, idx
+
 def get_bounding_box():
     return np.array([[-0.01, 0.8], [-0.01, 0.8], [-0.01, 0.8]])  # the world frame robot workspace
 
@@ -45,7 +221,7 @@ def depth2pcd(depth, serial, mask = None):
     with open("extrinsic_calibration.json", "r") as f:
         extrinsics = json.load(f)
 
-    with open("intrinsic_calibration.json", "r") as f:
+    with open("intrinsic_calibration_848.json", "r") as f:
         intrinsics = json.load(f)
 
     if mask is not None:
@@ -94,11 +270,13 @@ def mp4_to_numpy_list(path):
 class PostProcessor:
 
     def __init__(self, 
+            recording_dir,
             text_prompts='cloth.',
         ):
 
-        self.H, self.W = 480, 640
+        self.H, self.W = 480, 848
 
+        self.recording_dir = recording_dir
         self.text_prompts = text_prompts
 
         self.bbox = get_bounding_box()
@@ -116,13 +294,13 @@ class PostProcessor:
         processor = AutoProcessor.from_pretrained(model_id)
         grounding_model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(device)
 
-        recording_dir = "recordings/recording_1"
+
         serials = ["044322073544", "244622072067"]
 
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
             for serial in serials:
 
-                r = os.path.join(recording_dir, serial, "rgb.mp4")
+                r = os.path.join(self.recording_dir, serial, "rgb.mp4")
 
                 rgb_frames_full_pil = mp4_to_pil_list(r)
                 rgb_frames_full_np = mp4_to_numpy_list(r)
@@ -142,7 +320,6 @@ class PostProcessor:
                     ann_frame_idx = 0
                     objects = [None, None]
                     no_objs = False
-                    multi_objs = False
                     
                     while masks.sum() == 0:
                         if ann_frame == 0:
@@ -166,7 +343,7 @@ class PostProcessor:
                         input_boxes = results[0]["boxes"].cpu().numpy()
                         objects = results[0]["labels"]
 
-                        ## Convert PIL image to draw-able image
+                        ### Convert PIL image to draw-able image
                         #draw = ImageDraw.Draw(image)
 
                         #for box in input_boxes:
@@ -180,30 +357,27 @@ class PostProcessor:
                             continue
                             #assert "No objects found."
 
+                        #if len(objects) > 1:
+                        #    assert "Too many objects found."
                         if len(objects) > 1:
-                            assert "Too many objects found."
+                            print("[run_sam2] Multiple objects found. Please click the box you want.")
+                            input_boxes, objects, selected_idx = select_bounding_box_by_click_matplotlib(
+                                image_pil=image,
+                                input_boxes=input_boxes,
+                                labels=objects,
+                            )
+                            print(f"[run_sam2] Selected box {selected_idx}: {objects[0]}")
+                        #if len(objects) > 1:
+                        #    print("[run_sam2] Multiple objects found. Please click the box you want.")
+                        #    input_boxes, objects, selected_idx = select_bounding_box_by_click(
+                        #        image_pil=image,
+                        #        input_boxes=input_boxes,
+                        #        labels=objects,
+                        #        window_name=f"Select Box - frame {ann_frame}"
+                        #    )
+                        #    print(f"[run_sam2] Selected box {selected_idx}: {objects[0]}")
 
                         #TODO: Rather than do this stuff, just query use which bounding box to choose.
-                        #if len(objects) > 1:
-                        #    objects_masked = []
-                        #    input_boxes_masked = []
-                        #    depth = cv2.imread(depth_paths[ann_frame], cv2.IMREAD_UNCHANGED) / 1000.0
-                        #    mask = perception_module.get_mask_raw(depth, intrs[cam], extrs[cam])
-                        #    for i, obj in enumerate(objects):
-                        #        if obj == '':
-                        #            continue
-                        #        box = input_boxes[i].astype(int)
-                        #        mask_box = mask[box[1]:box[3], box[0]:box[2]]
-                        #        if mask_box.sum() > 0: # and not (mask_box.shape[0] > 200 and mask_box.shape[1] > 300):
-                        #            objects_masked.append(obj)
-                        #            input_boxes_masked.append(box)
-                        #    objects = objects_masked
-                        #    input_boxes = input_boxes_masked
-                        #    if len(objects) == 0:
-                        #        no_objs = True
-                        #        break
-                        #    elif len(objects) > 1:
-                        #        multi_objs = True
 
                         image_predictor.set_image(np.array(image))
 
@@ -218,19 +392,19 @@ class PostProcessor:
                             scores = scores[None]
                             logits = logits[None]
                         elif masks.ndim == 4:
-                            assert multi_objs
+                            raise "Multiple objects detected."
                     
                     # save this as a tmp video file to propagate over a chunk using SAM2
                     rgb_frames_chunk_np = rgb_frames_full_np[ann_frame: pivot_frame + seq_len ]
 
                     imageio.mimsave(
-                        os.path.join(recording_dir, serial, "tmp.mp4"),
+                        os.path.join(self.recording_dir, serial, "tmp.mp4"),
                         rgb_frames_chunk_np,
                         fps=30,
                         codec="libx264"
                     )
 
-                    inference_state = video_predictor.init_state(video_path=os.path.join(recording_dir, serial, "tmp.mp4"))
+                    inference_state = video_predictor.init_state(video_path=os.path.join(self.recording_dir, serial, "tmp.mp4"))
 
                     # Using box prompt
                     for object_id, (label, box) in enumerate(zip(objects, input_boxes), start=1):
@@ -286,7 +460,7 @@ class PostProcessor:
                         #    cv2.waitKey(100)
 
                 imageio.mimsave(
-                    os.path.join(recording_dir, serial, "mask.mp4"),
+                    os.path.join(self.recording_dir, serial, "mask.mp4"),
                     np.array(mask_video).astype(int) * 255,
                     fps=30,
                     codec="libx264"
@@ -295,15 +469,14 @@ class PostProcessor:
     def get_tracking(self):
             cotracker_predictor = CoTrackerPredictor(checkpoint="models/weights/cotracker/scaled_offline.pth", v2=False, offline=True, window_len=60).to('cuda')
 
-            recording_dir = "recordings/recording_1"
             serials = ["044322073544", "244622072067"]
 
             for serial in serials:
-                visualizer = Visualizer(save_dir=os.path.join(recording_dir, serial, "results_tracking"), pad_value=120, linewidth=3)
+                visualizer = Visualizer(save_dir=os.path.join(self.recording_dir, serial, "results_tracking"), pad_value=120, linewidth=3)
 
-                r = os.path.join(recording_dir, serial, "rgb.mp4")
-                m_r = os.path.join(recording_dir, serial, "mask.mp4")
-                d_r = os.path.join(recording_dir, serial, "depth.npz")
+                r = os.path.join(self.recording_dir, serial, "rgb.mp4")
+                m_r = os.path.join(self.recording_dir, serial, "mask.mp4")
+                d_r = os.path.join(self.recording_dir, serial, "depth.npz")
 
                 rgb_frames_full_np = mp4_to_numpy_list(r)
                 mask_frames_full_np = (np.array(mp4_to_numpy_list(m_r))[:, :, :,0] / 255).astype(np.uint8)
@@ -611,18 +784,28 @@ class PostProcessor:
                         #depth_mask_vis = np.logical_and(depth_mask_now, mask_now)
                         #cv2.imwrite(episode_data_dir_cam / "depth_mask" / f"{target_frame:06d}.png", depth_mask_vis * 255)
 
-                np.savez_compressed(os.path.join(recording_dir, serial, "velocities.npz"), velocities=np.array(velocities))
+                np.savez_compressed(os.path.join(self.recording_dir, serial, "velocities.npz"), velocities=np.array(velocities))
 
     def get_pcd(self):
 
-        recording_dir = "recordings/recording_1"
         serials = ["044322073544", "244622072067"]
 
-        rgb_frames_full_np = mp4_to_numpy_list(os.path.join(recording_dir, serials[0], "rgb.mp4"))
-        n_frames = len(rgb_frames_full_np) - 5
-        #n_frames = 95
+        rgb_frame_full_np_cache = {}
+        mask_frame_full_np_cache = {}
+        depth_frame_full_np_cache = {}
+        vel_frame_full_np_cache = {}
 
-        pcd_dir = os.path.join(recording_dir, "pcd_clean")
+        for serial in serials:
+            rgb_frame_full_np_cache[serial] = mp4_to_numpy_list(os.path.join(self.recording_dir, serial, "rgb.mp4"))
+            mask_frame_full_np_cache[serial] = (np.array(mp4_to_numpy_list(os.path.join(self.recording_dir, serial, "mask.mp4")))[:, :, :,0] / 255).astype(np.uint8)
+            depth_frame_full_np_cache[serial] = np.load(os.path.join(self.recording_dir, serial, "depth.npz"))['depth']
+            vel_frame_full_np_cache[serial] = np.load(os.path.join(self.recording_dir, serial, "velocities.npz"))['velocities']
+
+        rgb_frames_full_np = mp4_to_numpy_list(os.path.join(self.recording_dir, serials[0], "rgb.mp4"))
+        n_frames = len(rgb_frames_full_np) - 5
+        #n_frames = 70
+
+        pcd_dir = os.path.join(self.recording_dir, "pcd_clean")
 
         if os.path.exists(pcd_dir):
             shutil.rmtree(pcd_dir)
@@ -638,19 +821,10 @@ class PostProcessor:
 
             for serial in serials:
 
-                r = os.path.join(recording_dir, serial, "rgb.mp4")
-                m_r = os.path.join(recording_dir, serial, "mask.mp4")
-                d_r = os.path.join(recording_dir, serial, "depth.npz")
-                v_r = os.path.join(recording_dir, serial, "velocities.npz")
-
-                rgb_frames_full_np = mp4_to_numpy_list(r)
-                mask_frames_full_np = (np.array(mp4_to_numpy_list(m_r))[:, :, :,0] / 255).astype(np.uint8)
-
-                with np.load(d_r) as data:
-                    depth_frames_full_np = data['depth']
-
-                with np.load(v_r) as data:
-                    vel_frames_full_np = data['velocities']
+                rgb_frames_full_np = rgb_frame_full_np_cache[serial]
+                mask_frames_full_np = mask_frame_full_np_cache[serial]
+                depth_frames_full_np = depth_frame_full_np_cache[serial]
+                vel_frames_full_np = vel_frame_full_np_cache[serial]
 
                 mask = mask_frames_full_np[frame_id]
                 img = rgb_frames_full_np[frame_id]
@@ -762,12 +936,12 @@ class PostProcessor:
             vels_smooth = (weights[:, :, None] * vels[indices]).sum(axis=1)
             vels = vels_smooth
 
-            np.savez_compressed(os.path.join(recording_dir, "pcd_clean", f"{frame_id}.npz"), pts=pts, colors=colors, vels=vels)
+            np.savez_compressed(os.path.join(self.recording_dir, "pcd_clean", f"{frame_id}.npz"), pts=pts, colors=colors, vels=vels)
 
     def vis_pcd(self):
 
-        pcd_dir = "recordings/recording_1/pcd_clean/"
-        n_frames = 95
+        pcd_dir = os.path.join(self.recording_dir, "pcd_clean/")
+        n_frames = 70
 
         visualizer = o3d.visualization.Visualizer()
         visualizer.create_window()
@@ -791,7 +965,7 @@ class PostProcessor:
         #mesh.paint_uniform_color([0.8, 0.8, 0.8])
         #visualizer.add_geometry(mesh)
 
-        for i in range (1,95):
+        for i in range (1,71):
             for j in range(10):
                 pcd_path = os.path.join(pcd_dir, f"{i}.npz")
 
@@ -824,19 +998,19 @@ class PostProcessor:
                 line_set.colors = o3d.utility.Vector3dVector(colors)
 
                 visualizer.update_geometry(geometry)
-                visualizer.update_geometry(line_set)
+                #visualizer.update_geometry(line_set)
                 visualizer.poll_events()
                 visualizer.update_renderer()
                 print(f"[vis_pcd] Frame {i} done")
 
     def vis_traj(self):
-        pcd_dir = "recordings/recording_1/pcd_clean"
-        n_frames = 95
+        pcd_dir = os.path.join(self.recording_dir, "pcd_clean")
+        n_frames = 70
         #n_frames = 20
 
         start_frame = 0
-        pivot_skip = 95
-        seq_len = 95
+        pivot_skip = 70
+        seq_len = 70
 
         for pivot_frame in range(start_frame, n_frames, pivot_skip):
             pcd = np.load(os.path.join(pcd_dir, f"{pivot_frame}.npz"))
@@ -926,10 +1100,12 @@ if __name__ == '__main__':
     parser.add_argument('--text_prompts', type=str, default='')
     args = parser.parse_args()
 
-    pp = PostProcessor(args.text_prompts)
+    recording_dir = "recordings/rope_lift"
+
+    pp = PostProcessor(recording_dir, args.text_prompts)
     #pp.run_sam2()
     #pp.get_tracking()
-    #pp.get_pcd()
-    #pp.vis_pcd()
-    pp.vis_traj()
+    pp.get_pcd()
+    pp.vis_pcd()
+    #pp.vis_traj()
     #pp.get_sub_episodes()
