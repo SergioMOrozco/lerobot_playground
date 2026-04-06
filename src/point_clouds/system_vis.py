@@ -99,9 +99,14 @@ class SystemStateViewer:
         point_size=2.0,
         tune=True,
         robot_pcd_exclude_radius_m=0.03,
+        fusion_projection_stride=2,
+        fusion_scene_voxel_m=0.001,
     ):
         # Remove fused depth points within this distance (m) of the sampled robot mesh (world frame).
         self.robot_pcd_exclude_radius_m = robot_pcd_exclude_radius_m
+        # Speed: stride>1 subsamples depth/RGB before projection; scene_voxel_m downsamples world clouds.
+        self.fusion_projection_stride = fusion_projection_stride
+        self.fusion_scene_voxel_m = fusion_scene_voxel_m
 
         self.stream = MultiRealSenseStream(serials, extrinsic_json)
         self.robot_1 = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM3", id="bender_follower_arm"))
@@ -266,7 +271,9 @@ class SystemStateViewer:
             robot_points_world=np.asarray(robot_pcd_np, dtype=np.float64),
             robot_exclude_radius=self.robot_pcd_exclude_radius_m,
             robot_ref_max_points=256,
-            robot_ref_voxel_m=0.01
+            robot_ref_voxel_m=0.01,
+            projection_stride=self.fusion_projection_stride,
+            scene_voxel_m=self.fusion_scene_voxel_m,
         )
 
         for idx, pcd in enumerate(pcd_list):

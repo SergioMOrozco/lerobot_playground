@@ -105,8 +105,13 @@ def get_fused_point_cloud(
     robot_exclude_radius=None,
     robot_ref_max_points=4096,
     robot_ref_voxel_m=None,
+    projection_stride=1,
+    scene_voxel_m=None,
 ):
     """Fuse per-camera depth (and optional color) into one world-frame point cloud.
+
+    Most wall time is usually **depth→points** (pixel count) and **scene NN/bbox**
+    work, not ``robot_ref_max_points`` (that only shrinks the robot KD-tree).
 
     Args:
         datapoints: List of dicts per camera with ``depth``, ``color_intrinsics``,
@@ -126,11 +131,19 @@ def get_fused_point_cloud(
         robot_ref_max_points: Max robot samples after voxel downsample (speed vs coverage).
         robot_ref_voxel_m: Voxel size (m) for robot cloud decimation; ``None`` uses
             ``max(radius * 0.25, 0.005)``.
+        projection_stride: Integer >= 1. ``2`` halves depth/color resolution before
+            back-projection (~4× fewer points). Intrinsics are scaled accordingly.
+        scene_voxel_m: If set, voxel-downsample each camera cloud in **world** space
+            after transform and before bbox/robot (large speedup).
 
     Returns:
-        (merged_pc, pc_list): Fused cloud and per-camera clouds (both cropped if
-        ``bbox_3d`` is set; robot proximity filter applied when enabled).
+        (merged_pc, pc_list): One merge at the end; per-camera clouds stay consistent
+        with ``merged_pc``.
     """
+
+    if projection_stride < 1:
+        raise ValueError("projection_stride must be >= 1")
+    st = int(projection_stride)
 
     pc_list = []
     for datapoint in datapoints:
@@ -143,30 +156,38 @@ def get_fused_point_cloud(
 
         intr = datapoint["color_intrinsics"]  # added by your stream class
 
-        fl_x = intr.fx
-        fl_y = intr.fy
-        cx = intr.ppx
-        cy = intr.ppy
-        w = intr.width
-        h = intr.height
+        fl_x = intr.fx / st
+        fl_y = intr.fy / st
+        cx = intr.ppx / st
+        cy = intr.ppy / st
+        if st > 1:
+            depth = depth[::st, ::st]
+        depth = np.ascontiguousarray(depth)
+
+        w = int(depth.shape[1])
+        h = int(depth.shape[0])
 
         intrinsics = o3d.camera.PinholeCameraIntrinsic(w, h, fl_x, fl_y, cx, cy)
         depth_image = o3d.geometry.Image(depth)
 
         if datapoint["color"] is not None:
 
-            if datapoint["color"].dtype == np.float32:
-                img_uint8 = np.array(datapoint["color"] * 255, dtype=np.uint8)
+            color_arr = datapoint["color"]
+            if st > 1:
+                color_arr = color_arr[::st, ::st]
+
+            if color_arr.dtype == np.float32:
+                img_uint8 = np.ascontiguousarray(np.array(color_arr * 255, dtype=np.uint8))
             else:
-                img_uint8 = np.array(datapoint["color"])
+                img_uint8 = np.ascontiguousarray(np.asarray(color_arr, dtype=np.uint8))
 
             color_image = o3d.geometry.Image(img_uint8)
             rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
                 color_image, depth_image, convert_rgb_to_intensity=False
             )
             pointcloud = o3d.geometry.PointCloud.create_from_rgbd_image(
-                rgbd_image, 
-                intrinsics
+                rgbd_image,
+                intrinsics,
             )
 
         else:
@@ -174,16 +195,15 @@ def get_fused_point_cloud(
                 depth_image,
                 intrinsics,
                 depth_scale=1.0 / datapoint["depth_scale"],
-                depth_trunc=datapoint['max_depth'],
+                depth_trunc=datapoint["max_depth"],
             )
 
-        pointcloud.transform(datapoint['X_WC'])
+        pointcloud.transform(datapoint["X_WC"])
+
+        if scene_voxel_m is not None and float(scene_voxel_m) > 0:
+            pointcloud = pointcloud.voxel_down_sample(float(scene_voxel_m))
 
         pc_list.append(pointcloud)
-
-    merged_pc = o3d.geometry.PointCloud()
-    for p in pc_list:
-        merged_pc += p
 
     if bbox_3d is not None:
         b = np.asarray(bbox_3d, dtype=np.float64)
@@ -193,7 +213,6 @@ def get_fused_point_cloud(
                 "as rows [[min, max], ...] in world frame."
             )
         lo, hi = b[:, 0], b[:, 1]
-        merged_pc = _crop_point_cloud_to_aabb(merged_pc, lo, hi)
         pc_list = [_crop_point_cloud_to_aabb(p, lo, hi) for p in pc_list]
 
     if robot_points_world is not None:
@@ -206,11 +225,11 @@ def get_fused_point_cloud(
                 ref_voxel_m=robot_ref_voxel_m,
             )
             if tree is not None:
-                # Filter each camera once; rebuild merged to avoid a third full-cloud query.
                 pc_list = [_remove_points_near_reference_tree(p, tree, r) for p in pc_list]
-                merged_pc = o3d.geometry.PointCloud()
-                for p in pc_list:
-                    merged_pc += p
+
+    merged_pc = o3d.geometry.PointCloud()
+    for p in pc_list:
+        merged_pc += p
 
     return merged_pc, pc_list
 
