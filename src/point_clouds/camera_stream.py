@@ -9,6 +9,12 @@ import numpy as np
 import cv2
 import json
 import open3d as o3d
+
+try:
+    from scipy.spatial import cKDTree
+except ImportError:
+    cKDTree = None
+
 from sklearn.neighbors import NearestNeighbors
 
 from point_clouds.point_cloud_viewer import LivePointCloudViewer
@@ -29,28 +35,63 @@ def _crop_point_cloud_to_aabb(pcd: o3d.geometry.PointCloud, lo: np.ndarray, hi: 
     return pcd.select_by_index(idx)
 
 
-def _remove_points_near_reference(
-    pcd: o3d.geometry.PointCloud,
+def _prepare_robot_reference_tree(
     reference_xyz: np.ndarray,
     radius: float,
-) -> o3d.geometry.PointCloud:
-    """Drop points whose distance to the nearest reference sample is <= radius (world frame)."""
-    if radius <= 0 or reference_xyz is None:
-        return pcd
+    *,
+    max_ref_points: int = 4096,
+    ref_voxel_m=None,
+):
+    """Voxel-downsample + cap robot samples, then build a KD-tree (fast queries)."""
     ref = np.asarray(reference_xyz, dtype=np.float64).reshape(-1, 3)
-    finite = np.isfinite(ref).all(axis=1)
-    ref = ref[finite]
+    ref = ref[np.isfinite(ref).all(axis=1)]
     if ref.shape[0] == 0:
-        return pcd
+        return None
 
+    voxel = ref_voxel_m if ref_voxel_m is not None else max(radius * 0.25, 0.005)
+    rpcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(ref))
+    rpcd = rpcd.voxel_down_sample(float(voxel))
+    ref = np.asarray(rpcd.points, dtype=np.float64)
+    if ref.shape[0] == 0:
+        return None
+
+    if ref.shape[0] > max_ref_points:
+        sel = np.random.default_rng().choice(ref.shape[0], size=max_ref_points, replace=False)
+        ref = ref[sel]
+
+    if cKDTree is not None:
+        return cKDTree(ref)
+    nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree")
+    nn.fit(ref)
+    return nn
+
+
+def _nearest_dists_to_tree(tree, pts: np.ndarray) -> np.ndarray:
+    pts = np.asarray(pts, dtype=np.float64)
+    if pts.size == 0:
+        return np.zeros(0, dtype=np.float64)
+    if cKDTree is not None and isinstance(tree, cKDTree):
+        try:
+            dists, _ = tree.query(pts, k=1, workers=-1)
+        except TypeError:
+            dists, _ = tree.query(pts, k=1)
+        return np.asarray(dists, dtype=np.float64).reshape(-1)
+    dists, _ = tree.kneighbors(pts)
+    return dists[:, 0]
+
+
+def _remove_points_near_reference_tree(
+    pcd: o3d.geometry.PointCloud,
+    tree,
+    radius: float,
+) -> o3d.geometry.PointCloud:
+    """Drop points with nearest-neighbor distance to robot samples <= radius."""
+    if tree is None or radius <= 0:
+        return pcd
     pts = np.asarray(pcd.points)
     if pts.size == 0:
         return pcd
-
-    nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree")
-    nn.fit(ref)
-    dists, _ = nn.kneighbors(pts)
-    dists = dists[:, 0]
+    dists = _nearest_dists_to_tree(tree, pts)
     keep = dists > radius
     if not keep.any():
         return o3d.geometry.PointCloud()
@@ -62,6 +103,8 @@ def get_fused_point_cloud(
     bbox_3d=None,
     robot_points_world=None,
     robot_exclude_radius=None,
+    robot_ref_max_points=4096,
+    robot_ref_voxel_m=None,
 ):
     """Fuse per-camera depth (and optional color) into one world-frame point cloud.
 
@@ -80,6 +123,9 @@ def get_fused_point_cloud(
         robot_exclude_radius: Distance threshold in meters. If ``None`` or ``<= 0``,
             robot filtering is disabled. If ``robot_points_world`` is set but this
             is ``None``, defaults to ``0.03``.
+        robot_ref_max_points: Max robot samples after voxel downsample (speed vs coverage).
+        robot_ref_voxel_m: Voxel size (m) for robot cloud decimation; ``None`` uses
+            ``max(radius * 0.25, 0.005)``.
 
     Returns:
         (merged_pc, pc_list): Fused cloud and per-camera clouds (both cropped if
@@ -152,8 +198,19 @@ def get_fused_point_cloud(
 
     if robot_points_world is not None:
         r = robot_exclude_radius if robot_exclude_radius is not None else 0.03
-        merged_pc = _remove_points_near_reference(merged_pc, robot_points_world, r)
-        pc_list = [_remove_points_near_reference(p, robot_points_world, r) for p in pc_list]
+        if r > 0:
+            tree = _prepare_robot_reference_tree(
+                robot_points_world,
+                r,
+                max_ref_points=robot_ref_max_points,
+                ref_voxel_m=robot_ref_voxel_m,
+            )
+            if tree is not None:
+                # Filter each camera once; rebuild merged to avoid a third full-cloud query.
+                pc_list = [_remove_points_near_reference_tree(p, tree, r) for p in pc_list]
+                merged_pc = o3d.geometry.PointCloud()
+                for p in pc_list:
+                    merged_pc += p
 
     return merged_pc, pc_list
 

@@ -265,6 +265,8 @@ class SystemStateViewer:
             bbox,
             robot_points_world=np.asarray(robot_pcd_np, dtype=np.float64),
             robot_exclude_radius=self.robot_pcd_exclude_radius_m,
+            robot_ref_max_points=256,
+            robot_ref_voxel_m=0.01
         )
 
         for idx, pcd in enumerate(pcd_list):
