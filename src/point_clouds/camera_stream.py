@@ -9,25 +9,81 @@ import numpy as np
 import cv2
 import json
 import open3d as o3d
+from sklearn.neighbors import NearestNeighbors
+
 from point_clouds.point_cloud_viewer import LivePointCloudViewer
 
-def get_fused_point_cloud(datapoints):
-    """Fuses multiple point clouds from different frames into a single point cloud.
-    
-        Args:
-            datapoints (List[Dict[str, Any]]): A list of dictionaries, where each
-            dictionary contains data for a single camera view. Expected keys
-            include 'K' (intrinsic matrix), 'depth' (depth image), 'depth_scale',
-            'depth_to_color_extrinsic', 'X_WC' (world-to-camera extrinsic),
-            and the key specified by `points_str` (e.g., 'hand_points').
-        max_depth (float): The maximum depth value to consider when creating
-            the point cloud from a depth image. Points beyond this depth will
-            be ignored.
+
+def _crop_point_cloud_to_aabb(pcd: o3d.geometry.PointCloud, lo: np.ndarray, hi: np.ndarray):
+    """Keep only points inside the axis-aligned box [lo, hi] (world frame), inclusive."""
+    pts = np.asarray(pcd.points)
+    if pts.size == 0:
+        return pcd
+    lo = np.asarray(lo, dtype=np.float64).reshape(3)
+    hi = np.asarray(hi, dtype=np.float64).reshape(3)
+    mask = np.all((pts >= lo) & (pts <= hi), axis=1)
+    if not mask.any():
+        out = o3d.geometry.PointCloud()
+        return out
+    idx = np.nonzero(mask)[0]
+    return pcd.select_by_index(idx)
+
+
+def _remove_points_near_reference(
+    pcd: o3d.geometry.PointCloud,
+    reference_xyz: np.ndarray,
+    radius: float,
+) -> o3d.geometry.PointCloud:
+    """Drop points whose distance to the nearest reference sample is <= radius (world frame)."""
+    if radius <= 0 or reference_xyz is None:
+        return pcd
+    ref = np.asarray(reference_xyz, dtype=np.float64).reshape(-1, 3)
+    finite = np.isfinite(ref).all(axis=1)
+    ref = ref[finite]
+    if ref.shape[0] == 0:
+        return pcd
+
+    pts = np.asarray(pcd.points)
+    if pts.size == 0:
+        return pcd
+
+    nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree")
+    nn.fit(ref)
+    dists, _ = nn.kneighbors(pts)
+    dists = dists[:, 0]
+    keep = dists > radius
+    if not keep.any():
+        return o3d.geometry.PointCloud()
+    return pcd.select_by_index(np.nonzero(keep)[0])
+
+
+def get_fused_point_cloud(
+    datapoints,
+    bbox_3d=None,
+    robot_points_world=None,
+    robot_exclude_radius=None,
+):
+    """Fuse per-camera depth (and optional color) into one world-frame point cloud.
+
+    Args:
+        datapoints: List of dicts per camera with ``depth``, ``color_intrinsics``,
+            ``depth_scale``, ``max_depth`` (depth-only path), ``X_WC`` (4x4 world
+            from camera), optional ``color``, optional ``obj_mask``.
+        bbox_3d: Optional axis-aligned box in **world** coordinates after each
+            cloud is transformed by ``X_WC``. Shape ``(3, 2)``: row ``i`` is
+            ``[min, max]`` for ``(x, y, z)``. Points outside are removed from the
+            merged cloud and each entry in ``pc_list``. Same layout as
+            ``get_bounding_box()`` in ``postprocess.py``. Pass ``None`` to disable.
+        robot_points_world: Optional ``(N, 3)`` robot surface samples in the **same
+            world frame** as fused camera points (e.g. sampled URDF mesh). Fused
+            points within ``robot_exclude_radius`` of any sample are removed.
+        robot_exclude_radius: Distance threshold in meters. If ``None`` or ``<= 0``,
+            robot filtering is disabled. If ``robot_points_world`` is set but this
+            is ``None``, defaults to ``0.03``.
 
     Returns:
-        o3d.geometry.PointCloud: A single Open3D point cloud object containing
-            the fused points from all input datapoints, transformed into the
-            world coordinate system.
+        (merged_pc, pc_list): Fused cloud and per-camera clouds (both cropped if
+        ``bbox_3d`` is set; robot proximity filter applied when enabled).
     """
 
     pc_list = []
@@ -83,7 +139,23 @@ def get_fused_point_cloud(datapoints):
     for p in pc_list:
         merged_pc += p
 
-    return merged_pc, pc_list 
+    if bbox_3d is not None:
+        b = np.asarray(bbox_3d, dtype=np.float64)
+        if b.shape != (3, 2):
+            raise ValueError(
+                "bbox_3d must have shape (3, 2): [x_min,x_max], [y_min,y_max], [z_min,z_max] "
+                "as rows [[min, max], ...] in world frame."
+            )
+        lo, hi = b[:, 0], b[:, 1]
+        merged_pc = _crop_point_cloud_to_aabb(merged_pc, lo, hi)
+        pc_list = [_crop_point_cloud_to_aabb(p, lo, hi) for p in pc_list]
+
+    if robot_points_world is not None:
+        r = robot_exclude_radius if robot_exclude_radius is not None else 0.03
+        merged_pc = _remove_points_near_reference(merged_pc, robot_points_world, r)
+        pc_list = [_remove_points_near_reference(p, robot_points_world, r) for p in pc_list]
+
+    return merged_pc, pc_list
 
 class MultiRealSenseStream:
     def __init__(self, serial_numbers, extrinsics_file):

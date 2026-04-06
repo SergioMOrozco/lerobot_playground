@@ -5,6 +5,11 @@ import numpy as np
 from dataclasses import dataclass, field
 
 
+def _default_bbox_3d():
+    """World-frame AABB as (3, 2): rows x,y,z; columns [min, max]."""
+    return np.array([[0.0, 0.5], [0.0, 0.5], [0.0, 0.5]], dtype=np.float64)
+
+
 @dataclass
 class StateValues:
     cam1_pos: np.ndarray = field(default_factory=lambda: np.zeros(3))
@@ -12,6 +17,7 @@ class StateValues:
     cam2_pos: np.ndarray = field(default_factory=lambda: np.zeros(3))
     cam2_rot: np.ndarray = field(default_factory=lambda: np.zeros(3))
     joint_offsets: dict = field(default_factory=dict)
+    bbox_3d: np.ndarray = field(default_factory=_default_bbox_3d)
 
     def as_dict(self):
         return {
@@ -20,6 +26,7 @@ class StateValues:
             "cam2_pos": self.cam2_pos.copy(),
             "cam2_rot": self.cam2_rot.copy(),
             "joint_offsets": self.joint_offsets.copy(),
+            "bbox_3d": self.bbox_3d.copy(),
         }
 
 
@@ -65,6 +72,7 @@ class StateTuner:
 
         notebook.add(self._make_camera_frame("Camera 1", "cam1"), text="Camera 1")
         notebook.add(self._make_camera_frame("Camera 2", "cam2"), text="Camera 2")
+        notebook.add(self._make_bbox_frame(), text="BBox 3D")
         notebook.add(self._make_joint_frame(), text="Joints")
 
         # --- Quit Button ---
@@ -129,6 +137,42 @@ class StateTuner:
 
         return frame
 
+    def _make_bbox_frame(self):
+        frame = ttk.Frame(self.root, padding=10)
+        ttk.Label(
+            frame,
+            text="World-frame axis-aligned crop (m). Same layout as get_fused_point_cloud(bbox_3d).",
+        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        axis_labels = ("X", "Y", "Z")
+        for axis in range(3):
+            r = axis + 1
+            ttk.Label(frame, text=f"{axis_labels[axis]} min").grid(row=r, column=0, sticky="w", padx=(0, 4))
+            var_min = tk.DoubleVar(value=float(self.state.bbox_3d[axis, 0]))
+            var_min.trace_add(
+                "write",
+                lambda *_,
+                ax=axis,
+                v=var_min: self._update_bbox(ax, 0, v),
+            )
+            ttk.Spinbox(frame, from_=-10.0, to=10.0, increment=0.01, textvariable=var_min, width=10).grid(
+                row=r, column=1, padx=3
+            )
+
+            ttk.Label(frame, text="max").grid(row=r, column=2, sticky="w", padx=(8, 4))
+            var_max = tk.DoubleVar(value=float(self.state.bbox_3d[axis, 1]))
+            var_max.trace_add(
+                "write",
+                lambda *_,
+                ax=axis,
+                v=var_max: self._update_bbox(ax, 1, v),
+            )
+            ttk.Spinbox(frame, from_=-10.0, to=10.0, increment=0.01, textvariable=var_max, width=10).grid(
+                row=r, column=3, padx=3
+            )
+
+        return frame
+
     # ---------------------------------------------------------
     # Update handlers
     # ---------------------------------------------------------
@@ -138,6 +182,12 @@ class StateTuner:
 
     def _update_joint(self, joint, var):
         self.state.joint_offsets[joint] = var.get()
+
+    def _update_bbox(self, axis: int, col: int, var: tk.DoubleVar):
+        try:
+            self.state.bbox_3d[axis, col] = var.get()
+        except tk.TclError:
+            pass
 
 
 if __name__ == "__main__":

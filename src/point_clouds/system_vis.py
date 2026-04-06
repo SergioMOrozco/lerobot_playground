@@ -91,7 +91,17 @@ def foxglove_pointcloud_from_numpy(points: np.ndarray, colors=None):
     )
 
 class SystemStateViewer:
-    def __init__(self, serials, extrinsic_json, recording_name, point_size=2.0, tune=True):
+    def __init__(
+        self,
+        serials,
+        extrinsic_json,
+        recording_name,
+        point_size=2.0,
+        tune=True,
+        robot_pcd_exclude_radius_m=0.03,
+    ):
+        # Remove fused depth points within this distance (m) of the sampled robot mesh (world frame).
+        self.robot_pcd_exclude_radius_m = robot_pcd_exclude_radius_m
 
         self.stream = MultiRealSenseStream(serials, extrinsic_json)
         self.robot_1 = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM3", id="bender_follower_arm"))
@@ -249,7 +259,13 @@ class SystemStateViewer:
                 self.images[datapoint['serial']].append(np.array(datapoint['color']))
                 self.depths[datapoint['serial']].append(np.array(datapoint['depth']))
 
-        scene_pcd, pcd_list = get_fused_point_cloud(datapoints)
+        bbox = self.prev_tuned_state["bbox_3d"]
+        scene_pcd, pcd_list = get_fused_point_cloud(
+            datapoints,
+            bbox,
+            robot_points_world=np.asarray(robot_pcd_np, dtype=np.float64),
+            robot_exclude_radius=self.robot_pcd_exclude_radius_m,
+        )
 
         for idx, pcd in enumerate(pcd_list):
             pts = np.asarray(pcd.points, dtype=np.float32)
