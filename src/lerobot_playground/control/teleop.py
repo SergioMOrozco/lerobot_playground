@@ -6,6 +6,7 @@ import time
 from dataclasses import replace
 
 import numpy as np
+import open3d as o3d
 
 from lerobot.teleoperators.so101_leader import SO101LeaderConfig, SO101Leader
 from lerobot_playground.hardware_config import TeleopSystemConfig
@@ -27,7 +28,9 @@ class TeleopPointCloudSystem:
             leader.connect()
         print("Connected.")
 
-    def step(self, masks_by_serial=None) -> tuple[list[dict], np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+    def step(
+        self, masks_by_serial=None
+    ) -> tuple[list[dict], o3d.geometry.PointCloud, np.ndarray, dict[str, np.ndarray]]:
         """One control cycle: read leaders, update followers and viewer, return sensor data.
 
         Args:
@@ -37,7 +40,7 @@ class TeleopPointCloudSystem:
 
         Returns:
             datapoints: Raw per-camera datapoints used to build the fused point cloud.
-            scene_pcd: ``(N, 3)`` ``float64`` fused scene points in world frame.
+            scene_pcd: Open3D fused scene point cloud in world frame, including colors.
             robot_pcd: ``(M, 3)`` ``float64`` sampled follower mesh in world frame (first follower).
             robot_link_pcds: per-link robot clouds keyed by URDF link name.
 
@@ -94,7 +97,7 @@ def main() -> None:
     parser.add_argument(
         "--action-interpolation-duration",
         type=float,
-        default=0.12,
+        default=0.0,
         help="Seconds to blend to each new follower target. Use 0 to disable smoothing.",
     )
     parser.add_argument(

@@ -1,9 +1,17 @@
-"""Shared USB / device identifiers for SO101 teleop stacks (no I/O imports)."""
+"""Shared USB / device identifiers for SO101 teleop stacks (no I/O imports).
+
+Actual device values (ports, ids, RealSense serials) live in ``hardware_config.yaml``,
+not here -- see :func:`load_hardware_devices`. Edit that file when your USB layout changes.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+
+import yaml
+
+from lerobot_playground.paths import resolve_hardware_config_yaml
 
 
 @dataclass(frozen=True)
@@ -16,16 +24,52 @@ class SO101AxisConfig:
     """LeRobot calibration / bus id, e.g. ``bender_leader_arm``."""
 
 
-DEFAULT_SO101_LEADERS: tuple[SO101AxisConfig, ...] = (
-    SO101AxisConfig("/dev/ttyACM0", "bender_leader_arm"),
-    SO101AxisConfig("/dev/ttyACM1", "clamps_leader_arm"),
-)
-DEFAULT_SO101_FOLLOWERS: tuple[SO101AxisConfig, ...] = (
-    SO101AxisConfig("/dev/ttyACM3", "bender_follower_arm"),
-    SO101AxisConfig("/dev/ttyACM2", "clamps_follower_arm"),
-)
+HARDWARE_CONFIG_YAML = "hardware_config.yaml"
+"""Default filename for the editable device map; resolved via
+:func:`lerobot_playground.paths.resolve_hardware_config_yaml`."""
+
+
+@dataclass(frozen=True)
+class HardwareDevices:
+    """Leader/follower ports+ids and RealSense serials, as loaded from YAML."""
+
+    leaders: tuple[SO101AxisConfig, ...]
+    followers: tuple[SO101AxisConfig, ...]
+    realsense_serials: tuple[str, ...]
+
+
+def _axis_configs(entries: Sequence[Mapping[str, Any]], *, key: str) -> tuple[SO101AxisConfig, ...]:
+    axes = []
+    for i, entry in enumerate(entries):
+        try:
+            axes.append(SO101AxisConfig(port=str(entry["port"]), id=str(entry["id"])))
+        except KeyError as e:
+            raise ValueError(f"{HARDWARE_CONFIG_YAML}: {key}[{i}] missing required field {e}") from e
+    return tuple(axes)
+
+
+def load_hardware_devices(path: str | Path = HARDWARE_CONFIG_YAML) -> HardwareDevices:
+    """Load leader/follower ports+ids and RealSense serials from ``hardware_config.yaml``.
+
+    Uses the same search order as camera extrinsics (env var, cwd, package-adjacent ``src/``);
+    see :func:`lerobot_playground.paths.resolve_hardware_config_yaml`.
+    """
+    resolved = resolve_hardware_config_yaml(path)
+    with open(resolved) as f:
+        data = yaml.safe_load(f) or {}
+
+    return HardwareDevices(
+        leaders=_axis_configs(data.get("leaders") or [], key="leaders"),
+        followers=_axis_configs(data.get("followers") or [], key="followers"),
+        realsense_serials=tuple(str(s) for s in data.get("realsense_serials") or []),
+    )
+
+
+_DEVICES = load_hardware_devices()
+DEFAULT_SO101_LEADERS: tuple[SO101AxisConfig, ...] = _DEVICES.leaders
+DEFAULT_SO101_FOLLOWERS: tuple[SO101AxisConfig, ...] = _DEVICES.followers
 DEFAULT_ROBOT_CALIBRATION_IDS: tuple[str, ...] = tuple(f.id for f in DEFAULT_SO101_FOLLOWERS)
-DEFAULT_REALSENSE_SERIALS: tuple[str, ...] = ("244622072067", "044322073544")
+DEFAULT_REALSENSE_SERIALS: tuple[str, ...] = _DEVICES.realsense_serials
 
 
 def _validate_axis_sets(

@@ -1,0 +1,16 @@
+# SO101 leader/follower ports + LeRobot ids, and RealSense camera serials.
+# Edit this file to match your hardware -- no code changes needed.
+#
+# leaders/followers must be the same length (one leader drives one follower,
+# matched by list position). realsense_serials needs at least one entry.
+
+leaders:
+  - port: /dev/ttyACM0
+    id: bender_leader_arm
+
+followers:
+  - port: /dev/ttyACM2
+    id: gray_follower_arm
+
+realsense_serials:
+  - "044322073544"

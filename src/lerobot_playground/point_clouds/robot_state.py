@@ -14,27 +14,6 @@ from urchin import URDF
 from lerobot_playground.paths import CALIBRATION_DIR
 
 
-# joint limit written in USD (degree)
-SO101_FOLLOWER_USD_JOINT_LIMLITS = {
-    "shoulder_pan.pos": (-110.0, 110.0),
-    "shoulder_lift.pos": (-100.0, 100.0),
-    "elbow_flex.pos": (-100.0, 90.0),
-    "wrist_flex.pos": (-95.0, 95.0),
-    "wrist_roll.pos": (-160.0, 160.0),
-    "gripper.pos": (-10, 100.0),
-}
-
-# motor limit written in real device (normalized to related range)
-SO101_FOLLOWER_MOTOR_LIMITS = {
-    "shoulder_pan.pos": (-100.0, 100.0),
-    "shoulder_lift.pos": (-100.0, 100.0),
-    "elbow_flex.pos": (-100.0, 100.0),
-    "wrist_flex.pos": (-100.0, 100.0),
-    "wrist_roll.pos": (-100.0, 100.0),
-    "gripper.pos": (0.0, 100.0),
-}
-
-
 class RobotState:
     def __init__(
         self,
@@ -89,22 +68,39 @@ class RobotState:
             )
         return path
 
-    def ticks_to_radians(self, raw, homing_offset):
+    def ticks_to_radians(self, raw):
+        """Tick reading -> radians relative to the robot's home pose.
+
+        ``raw`` (e.g. calibration range_min/range_max, or a live Present_Position
+        read) is already homing-corrected by the motor's own firmware --
+        Feetech servos compute ``Present_Position = Actual_Position -
+        Homing_Offset`` on-device, so every tick value LeRobot's software ever
+        sees already has that applied. The reference point application code
+        needs is the fixed encoder half-turn (half of TICKS_PER_REV - 1), which
+        is what LeRobot's ``set_half_turn_homings`` calibration procedure
+        defines as the robot's home/zero pose -- not ``homing_offset`` itself,
+        which is firmware bookkeeping, not something to re-apply here.
+        """
         TICKS_PER_REV = 4096
-        return (raw + homing_offset) * (2 * np.pi / TICKS_PER_REV)
+        HALF_TURN = (TICKS_PER_REV - 1) // 2
+        return (raw - HALF_TURN) * (2 * np.pi / TICKS_PER_REV)
 
     def compute_phys_ranges(self, calib_dict):
+        """This robot's own calibrated physical range per joint (radians), from its
+        calibration file's range_min/range_max -- see
+        convert_lerobot_action_to_radians for why this must be per-robot, not a
+        generic reference range."""
         phys_ranges = {}
 
         for joint, data in calib_dict.items():
-            range_min = data["range_min"]
-            range_max = data["range_max"]
-            offset = data["homing_offset"]
+            lo = self.ticks_to_radians(data["range_min"])
+            hi = self.ticks_to_radians(data["range_max"])
 
-            lo = self.ticks_to_radians(range_min, offset)
-            hi = self.ticks_to_radians(range_max, offset)
-
-            phys_ranges[joint] = [float(lo), float(hi)]
+            phys_ranges[joint] = {
+                "lo": float(lo),
+                "hi": float(hi),
+                "drive_mode": bool(data.get("drive_mode", 0)),
+            }
 
         return phys_ranges
 
@@ -163,25 +159,28 @@ class RobotState:
                 self.link_visual_points.append((link.name, pts_visual.astype(np.float64, copy=False)))
 
     def convert_lerobot_action_to_radians(self, joint_state):
+        """Un-normalize LeRobot's motor-space observation into this robot's own
+        calibrated physical joint angles (radians), via self.PHYS_RANGES.
+
+        obs["<joint>.pos"] is produced by MotorsBus._normalize as a fraction of
+        *this specific motor's* calibrated range_min/range_max (RANGE_M100_100 for
+        all joints, RANGE_0_100 for the gripper -- see lerobot.motors.motors_bus).
+        It has no relationship to any generic/reference angular range, so it must
+        be un-normalized through this robot's own calibration, not a shared table
+        -- two physical units calibrated at different times can have meaningfully
+        different range_min/range_max.
         """
-        Convert the action from Lerobot to LeIsaac. Just convert value, not include the format.
-        """
+        positions = {}
+        for joint, r in self.PHYS_RANGES.items():
+            lo_clip = 0.0 if joint == "gripper" else -100.0
+            norm = float(np.clip(joint_state[f"{joint}.pos"], lo_clip, 100.0))
+            if joint == "gripper":
+                frac = (100.0 - norm if r["drive_mode"] else norm) / 100.0
+            else:
+                frac = ((100.0 - norm) if r["drive_mode"] else (100.0 + norm)) / 200.0
+            positions[joint] = r["lo"] + frac * (r["hi"] - r["lo"])
 
-        processed_action = np.zeros(6)
-        joint_limits = SO101_FOLLOWER_USD_JOINT_LIMLITS
-        motor_limits = SO101_FOLLOWER_MOTOR_LIMITS
-
-        for idx, joint_name in enumerate(joint_limits):
-            motor_limit_range = motor_limits[joint_name]
-            joint_limit_range = joint_limits[joint_name]
-            motor_range = motor_limit_range[1] - motor_limit_range[0]
-            joint_range = joint_limit_range[1] - joint_limit_range[0]
-            motor_degree = joint_state[joint_name] - motor_limit_range[0]
-            processed_degree = motor_degree / motor_range * joint_range + joint_limit_range[0]
-            processed_radius = processed_degree / 180.0 * np.pi  # convert to radian
-            processed_action[idx] = processed_radius
-
-        return processed_action
+        return positions
 
     def get_joint_positions(self, obs):
         """Joint configuration for FK (radians)."""

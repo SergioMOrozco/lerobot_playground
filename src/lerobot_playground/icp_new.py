@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import itertools
 import os
 import json
 import numpy as np
@@ -39,6 +40,7 @@ def depth2pcd(depth, serial, mask=None):
 # ------------------------------------------------------------
 # Fixed camera→mesh correspondences (indices into cam_pts and mesh_pts)
 # ------------------------------------------------------------
+#def compute_fixed_cam_mesh_correspondences(pts_cam, T_init, mesh_kd, mesh_pts, max_dist=1.0):
 def compute_fixed_cam_mesh_correspondences(pts_cam, T_init, mesh_kd, mesh_pts, max_dist=0.03):
     """
     pts_cam: (N,3) in camera frame
@@ -114,27 +116,35 @@ def compute_fixed_cam_cam_pairs(pts1_cam, pts2_cam, T1_init, T2_init,
     return np.asarray(idx1_pairs, dtype=np.int64), np.asarray(idx2_pairs, dtype=np.int64)
 
 
+def discover_calibration_serials(calib_dir):
+    """Serials with both depth.npz and mask.png under calib_dir/<serial>/."""
+    serials = []
+    for name in sorted(os.listdir(calib_dir)):
+        d = os.path.join(calib_dir, name)
+        if (
+            os.path.isdir(d)
+            and os.path.exists(os.path.join(d, "depth.npz"))
+            and os.path.exists(os.path.join(d, "mask.png"))
+        ):
+            serials.append(name)
+    return serials
+
+
 # ------------------------------------------------------------
 # Param <-> transform helpers
 # ------------------------------------------------------------
-def params_to_transforms(p):
+def params_to_transforms(p, n_cams):
     """
-    p: (12,) = [r1(3), t1(3), r2(3), t2(3)]
+    p: (6 * n_cams,) = [r_0(3), t_0(3), r_1(3), t_1(3), ...]
     """
-    r1 = p[0:3]
-    t1 = p[3:6]
-    r2 = p[6:9]
-    t2 = p[9:12]
-
-    T1 = np.eye(4)
-    T1[:3, :3] = R.from_rotvec(r1).as_matrix()
-    T1[:3, 3] = t1
-
-    T2 = np.eye(4)
-    T2[:3, :3] = R.from_rotvec(r2).as_matrix()
-    T2[:3, 3] = t2
-
-    return T1, T2
+    p = p.reshape(n_cams, 6)
+    transforms = []
+    for r, t in zip(p[:, 0:3], p[:, 3:6]):
+        T = np.eye(4)
+        T[:3, :3] = R.from_rotvec(r).as_matrix()
+        T[:3, 3] = t
+        transforms.append(T)
+    return transforms
 
 
 def matrix_to_rotvec(T):
@@ -151,12 +161,16 @@ def main():
     with open("extrinsic_calibration.json", "r") as f:
         extr = json.load(f)
 
-    serials = sorted(extr.keys())
-    if len(serials) != 2:
-        raise RuntimeError(f"Expected 2 cameras, found {len(serials)}: {serials}")
+    # -------- Discover cameras with calibration data on disk --------
+    available = discover_calibration_serials(calib_dir)
+    serials = [s for s in available if s in extr]
+    missing = sorted(set(available) - set(extr))
+    if missing:
+        print(f"Warning: skipping {missing} (no entry in extrinsic_calibration.json)")
+    if not serials:
+        raise RuntimeError(f"No calibration_files serials with extrinsics found in {calib_dir}")
 
-    s1, s2 = serials
-    print("Calibrating cameras:", s1, s2)
+    print("Calibrating cameras:", serials)
 
     # -------- Load robot mesh --------
     mesh_npz = os.path.join(calib_dir, "robot_pcd.npz")
@@ -192,31 +206,31 @@ def main():
         print(f"{serial}: using {pts.shape[0]} fixed points")
 
     # -------- Initial parameters --------
-    T1_init = np.asarray(extr[s1]["X_WC"])
-    T2_init = np.asarray(extr[s2]["X_WC"])
-
-    params0 = np.zeros(12, dtype=np.float64)
-    params0[0:3] = matrix_to_rotvec(T1_init)
-    params0[3:6] = T1_init[:3, 3]
-    params0[6:9] = matrix_to_rotvec(T2_init)
-    params0[9:12] = T2_init[:3, 3]
+    T_init = {}
+    params0 = np.zeros(6 * len(serials), dtype=np.float64)
+    for i, serial in enumerate(serials):
+        T_init[serial] = np.asarray(extr[serial]["X_WC"])
+        params0[6 * i : 6 * i + 3] = matrix_to_rotvec(T_init[serial])
+        params0[6 * i + 3 : 6 * i + 6] = T_init[serial][:3, 3]
 
     # -------- Fixed cam->mesh correspondences --------
-    cam_idx1, mesh_idx1 = compute_fixed_cam_mesh_correspondences(
-        cam_pts[s1], T1_init, mesh_kd, mesh_points
-    )
-    cam_idx2, mesh_idx2 = compute_fixed_cam_mesh_correspondences(
-        cam_pts[s2], T2_init, mesh_kd, mesh_points
-    )
-
-    print(f"{s1}: {len(cam_idx1)} cam->mesh correspondences")
-    print(f"{s2}: {len(cam_idx2)} cam->mesh correspondences")
+    cam_mesh_corr = {
+        serial: compute_fixed_cam_mesh_correspondences(
+            cam_pts[serial], T_init[serial], mesh_kd, mesh_points
+        )
+        for serial in serials
+    }
+    for serial, (cam_idx, mesh_idx) in cam_mesh_corr.items():
+        print(f"{serial}: {len(cam_idx)} cam->mesh correspondences")
 
     # -------- Fixed cam<->cam correspondences (index pairs into cam_pts) --------
-    idx12_1, idx12_2 = compute_fixed_cam_cam_pairs(
-        cam_pts[s1], cam_pts[s2], T1_init, T2_init
-    )
-    print(f"Camera-camera pairs: {idx12_1.shape[0]}")
+    pairwise_corr = {}
+    for s_i, s_j in itertools.combinations(serials, 2):
+        idx_i, idx_j = compute_fixed_cam_cam_pairs(
+            cam_pts[s_i], cam_pts[s_j], T_init[s_i], T_init[s_j]
+        )
+        pairwise_corr[(s_i, s_j)] = (idx_i, idx_j)
+        print(f"Camera-camera pairs {s_i}<->{s_j}: {idx_i.shape[0]}")
 
     # Weights
     w_icp = 1.0
@@ -224,32 +238,28 @@ def main():
 
     # -------- Residual function --------
     def residuals(p):
-        T1, T2 = params_to_transforms(p)
-        R1, t1 = T1[:3, :3], T1[:3, 3]
-        R2, t2 = T2[:3, :3], T2[:3, 3]
+        transforms = params_to_transforms(p, len(serials))
+        world_pts = {}
+        for serial, T in zip(serials, transforms):
+            Rm, t = T[:3, :3], T[:3, 3]
+            world_pts[serial] = (Rm @ cam_pts[serial].T).T + t
 
-        # Transform camera points to world
-        p1w = (R1 @ cam_pts[s1].T).T + t1  # (N1,3)
-        p2w = (R2 @ cam_pts[s2].T).T + t2  # (N2,3)
+        parts = []
 
         # --- camera->mesh ICP residuals (point-to-plane) ---
-        q1 = mesh_points[mesh_idx1]
-        n1 = mesh_normals[mesh_idx1]
-        r1 = np.sum(n1 * (p1w[cam_idx1] - q1), axis=1)
-
-        q2 = mesh_points[mesh_idx2]
-        n2 = mesh_normals[mesh_idx2]
-        r2 = np.sum(n2 * (p2w[cam_idx2] - q2), axis=1)
+        for serial in serials:
+            cam_idx, mesh_idx = cam_mesh_corr[serial]
+            q = mesh_points[mesh_idx]
+            n = mesh_normals[mesh_idx]
+            parts.append(w_icp * np.sum(n * (world_pts[serial][cam_idx] - q), axis=1))
 
         # --- camera<->camera consistency (3D diffs at index pairs) ---
-        if idx12_1.size > 0:
-            p1_pair = p1w[idx12_1]
-            p2_pair = p2w[idx12_2]
-            r12 = (p1_pair - p2_pair).reshape(-1)
-        else:
-            r12 = np.zeros(0, dtype=np.float64)
+        for (s_i, s_j), (idx_i, idx_j) in pairwise_corr.items():
+            if idx_i.size == 0:
+                continue
+            parts.append(w_cc * (world_pts[s_i][idx_i] - world_pts[s_j][idx_j]).reshape(-1))
 
-        return np.concatenate([w_icp * r1, w_icp * r2, w_cc * r12])
+        return np.concatenate(parts)
 
     # -------- Optimize --------
     print("Running joint ICP optimization...")
@@ -267,23 +277,24 @@ def main():
     print("Final   residual norm:", np.linalg.norm(residuals(result.x)))
 
     p_opt = result.x
-    T1_opt, T2_opt = params_to_transforms(p_opt)
+    T_opt = params_to_transforms(p_opt, len(serials))
 
     # -------- Save updated extrinsics --------
-    new_extr = {
-        s1: {"X_WC": T1_opt.tolist()},
-        s2: {"X_WC": T2_opt.tolist()},
-    }
+    # Merge into the existing extrinsics rather than overwrite, so a camera
+    # not present in calibration_files this run (e.g. temporarily unplugged)
+    # keeps its previous entry instead of being dropped from the file.
+    for serial, T in zip(serials, T_opt):
+        extr[serial] = {"X_WC": T.tolist()}
 
     with open("extrinsic_calibration.json", "w") as f:
-        json.dump(new_extr, f, indent=4)
+        json.dump(extr, f, indent=4)
 
     print("Saved refined extrinsics to extrinsic_calibration.json")
 
     # -------- Visualize merged point clouds (using same cam_pts) --------
     merged = o3d.geometry.PointCloud()
 
-    for serial, T in zip([s1, s2], [T1_opt, T2_opt]):
+    for serial, T in zip(serials, T_opt):
         Rw, tw = T[:3, :3], T[:3, 3]
         pts_cam = cam_pts[serial]
         pts_world = (Rw @ pts_cam.T).T + tw

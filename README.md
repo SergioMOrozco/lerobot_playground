@@ -41,7 +41,24 @@ Teleop drives **N SO101 follower** arms from **N SO101 leader** teleoperators wh
 
 - `pyrealsense2` (use `pip install -e ".[realsense]"`).
 - **Camera extrinsics** in JSON (see below). Intrinsics can be written on shutdown when missing (see `SystemStateViewer.close`).
-- A **`TeleopSystemConfig`** (see `lerobot_playground.hardware_config`) listing **RealSense serials**, **leader** `port` / `id`, and **follower** `port` / `id`. Defaults match the original lab two-arm layout; override in Python or use CLI overrides below.
+- A **`TeleopSystemConfig`** (see `lerobot_playground.hardware_config`) listing **RealSense serials**, **leader** `port` / `id`, and **follower** `port` / `id`. Defaults are loaded from `hardware_config.yaml` (see below); override in Python or use CLI overrides below.
+
+### Hardware config
+
+Leader/follower ports+ids and RealSense serials live in **`hardware_config.yaml`**, not in Python — edit that file when your USB layout changes, no code changes needed. Same resolution order as the extrinsics JSON (below), with its own env var **`LEROBOT_PLAYGROUND_HARDWARE_CONFIG`**. A dev-checkout copy ships at **`src/hardware_config.yaml`**:
+
+```yaml
+leaders:
+  - port: /dev/ttyACM0
+    id: bender_leader_arm
+followers:
+  - port: /dev/ttyACM3
+    id: bender_follower_arm
+realsense_serials:
+  - "244622072067"
+```
+
+`leaders`/`followers` must be the same length (matched by list position); `realsense_serials` needs at least one entry.
 
 ### Calibration files
 
@@ -105,7 +122,7 @@ With `--visualization foxglove` or `both`, open **Foxglove** and connect to the 
 
 Build a **`TeleopSystemConfig`** (`lerobot_playground.hardware_config`) with **`SO101AxisConfig`** entries for each **leader** and **follower** (`port` + LeRobot `id`), **`realsense_serials`**, and optional fields (`urdf_path`, `robot_calibration_ids`, `camera_width`, `camera_height`, `camera_fps`, `tune`, `publish_to_foxglove`, `display_point_cloud_viewer`). **`len(leaders)` must equal `len(followers)`** (one leader action per follower). **`robot_calibration_ids`** defaults to each follower’s `id`; the **first** follower’s observation drives the mesh / TF visualization returned as **`robot_pcd`** and **`robot_link_pcds`**. Robot mesh points are sampled once at startup and then transformed by FK every step.
 
-**Minimal** (same behavior as the CLI defaults, but from your own file): call **`step()`** each tick for **`datapoints`**, **`scene_pcd`**, **`robot_pcd`**, and **`robot_link_pcds`**. `datapoints` contains the raw per-camera color/depth data used for fusion. `scene_pcd` / `robot_pcd` are **`(N, 3)`** / **`(M, 3)`** **`float64`** arrays; `robot_link_pcds` is a **`dict[str, np.ndarray]`** keyed by URDF link name. You can pass optional image masks into `step(masks_by_serial=...)`; nonzero / `True` pixels are kept. Call **`close()`** when `viewer.quit` is set:
+**Minimal** (same behavior as the CLI defaults, but from your own file): call **`step()`** each tick for **`datapoints`**, **`scene_pcd`**, **`robot_pcd`**, and **`robot_link_pcds`**. `datapoints` contains the raw per-camera color/depth data used for fusion. `scene_pcd` is the full Open3D point cloud, so you can read both `np.asarray(scene_pcd.points)` and `np.asarray(scene_pcd.colors)`. `robot_pcd` is an **`(M, 3)`** **`float64`** array, and `robot_link_pcds` is a **`dict[str, np.ndarray]`** keyed by URDF link name. You can pass optional image masks into `step(masks_by_serial=...)`; nonzero / `True` pixels are kept. Call **`close()`** when `viewer.quit` is set:
 
 ```python
 import time
@@ -146,7 +163,9 @@ if __name__ == "__main__":
         while not system.viewer.quit:
             t0 = time.monotonic()
             datapoints, scene_pcd, robot_pcd, robot_link_pcds = system.step()
-            # use datapoints / scene_pcd / robot_pcd / robot_link_pcds here
+            scene_points = np.asarray(scene_pcd.points)
+            scene_colors = np.asarray(scene_pcd.colors)
+            # use datapoints / scene_points / scene_colors / robot_pcd / robot_link_pcds here
             if period_s is not None:
                 time.sleep(max(0.0, period_s - (time.monotonic() - t0)))
     finally:

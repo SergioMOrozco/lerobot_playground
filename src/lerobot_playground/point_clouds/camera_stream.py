@@ -57,7 +57,11 @@ def get_fused_point_cloud(datapoints):
 
             color_image = o3d.geometry.Image(img_uint8)
             rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
-                color_image, depth_image, convert_rgb_to_intensity=False
+                color_image,
+                depth_image,
+                depth_scale=1.0 / datapoint["depth_scale"],
+                depth_trunc=datapoint["max_depth"],
+                convert_rgb_to_intensity=False,
             )
             pointcloud = o3d.geometry.PointCloud.create_from_rgbd_image(
                 rgbd_image,
@@ -65,12 +69,7 @@ def get_fused_point_cloud(datapoints):
             )
 
         else:
-            pointcloud = o3d.geometry.PointCloud.create_from_depth_image(
-                depth_image,
-                intrinsics,
-                depth_scale=1.0 / datapoint["depth_scale"],
-                depth_trunc=datapoint["max_depth"],
-            )
+            raise ValueError("Color is required for RGBD fusion.")
 
         pointcloud.transform(datapoint["X_WC"])
 

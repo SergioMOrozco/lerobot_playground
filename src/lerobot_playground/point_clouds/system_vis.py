@@ -176,7 +176,7 @@ class SystemStateViewer:
         #
         # Returns:
         #     datapoints: raw per-camera datapoints used to build the fused point cloud.
-        #     scene_pcd: ``(N, 3)`` float64 world points from the fused scene cloud.
+        #     scene_pcd: Open3D point cloud with fused scene points and colors.
         #     robot_pcd: ``(M, 3)`` float64 world points for the sampled follower mesh.
         #     robot_link_pcds: per-link robot point clouds keyed by URDF link name.
 
@@ -263,7 +263,7 @@ class SystemStateViewer:
             viewer_colors = np.vstack((scene_colors, robot_colors))
             self.pcd_viewer.update(viewer_points, viewer_colors)
 
-        return datapoints, scene_pcd_np, robot_pcd_np, robot_link_pcds
+        return datapoints, scene_pcd, robot_pcd_np, robot_link_pcds
 
 
     def _start_action_thread(self) -> None:
