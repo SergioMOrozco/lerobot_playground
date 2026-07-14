@@ -21,6 +21,7 @@ dependencies = [
     "lerobot==0.4.2",
     "urchin",
     "foxglove-sdk",
+    "feetech-servo-sdk"
 ]
 
 [project.optional-dependencies]

@@ -17,7 +17,7 @@ import foxglove
 from foxglove.schemas import FrameTransforms
 from foxglove.schemas import PointCloud, PackedElementField, PackedElementFieldNumericType
 from lerobot.robots.so101_follower import SO101FollowerConfig, SO101Follower
-from lerobot_playground.hardware_config import TeleopSystemConfig
+from lerobot_playground.teleop_config import TeleopSystemConfig
 from lerobot_playground.paths import CALIBRATION_DIR
 from lerobot_playground.point_clouds.camera_stream import MultiRealSenseStream, get_fused_point_cloud
 from lerobot_playground.point_clouds.point_cloud_viewer import LivePointCloudViewer

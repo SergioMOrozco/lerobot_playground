@@ -1,0 +1,53 @@
+# Full TeleopSystemConfig, as YAML. Edit this file to change hardware wiring or run
+# settings -- no code changes needed. See lerobot_playground.teleop_config for field docs.
+
+# leaders/followers must be the same length (one leader drives one follower,
+# matched by list position). realsense_serials needs at least one entry.
+leaders:
+  - port: /dev/ttyACM0
+    id: bender_leader_arm
+
+followers:
+  - port: /dev/ttyACM2
+    id: gray_follower_arm
+
+realsense_serials:
+  - "044322073544"
+
+# Camera extrinsics JSON (cwd, LEROBOT_PLAYGROUND_EXTRINSIC_JSON, or src/ next to package).
+extrinsic_json: extrinsic_calibration.json
+
+# Non-empty -> write recordings/<name>/ on shutdown.
+recording_name: ""
+
+# null -> bundled so101_new_calib.urdf under the package's calibration/ dir.
+urdf_path: null
+
+# HF / LeRobot calibration name per follower. null -> each follower's id.
+robot_calibration_ids: null
+
+# Directory containing <robot_calibration_id>.json. null uses LeRobot defaults.
+robot_calibration_dir: null
+
+# Explicit calibration JSON path per follower; overrides robot_calibration_dir.
+robot_calibration_paths: null
+
+# Show the Tk capture/save control panel.
+tune: true
+
+point_size: 2.0
+
+# RealSense color/depth stream settings.
+camera_width: 848
+camera_height: 480
+camera_fps: 60
+
+# Seconds to blend from the current command to a new follower target. 0 disables smoothing.
+action_interpolation_duration_s: 0.0
+# Follower command loop rate while action interpolation is enabled.
+action_command_hz: 50.0
+
+# Start Foxglove and publish point clouds / transforms.
+publish_to_foxglove: true
+# Show full scene + robot clouds in the Open3D point cloud viewer.
+display_point_cloud_viewer: false

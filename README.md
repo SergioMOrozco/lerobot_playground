@@ -41,11 +41,11 @@ Teleop drives **N SO101 follower** arms from **N SO101 leader** teleoperators wh
 
 - `pyrealsense2` (use `pip install -e ".[realsense]"`).
 - **Camera extrinsics** in JSON (see below). Intrinsics can be written on shutdown when missing (see `SystemStateViewer.close`).
-- A **`TeleopSystemConfig`** (see `lerobot_playground.hardware_config`) listing **RealSense serials**, **leader** `port` / `id`, and **follower** `port` / `id`. Defaults are loaded from `hardware_config.yaml` (see below); override in Python or use CLI overrides below.
+- A **`teleop_config.yaml`** (see below) describing the full **`TeleopSystemConfig`**: RealSense serials, leader/follower `port` + `id`, and run settings (recording, camera stream, visualization, smoothing).
 
-### Hardware config
+### Teleop config
 
-Leader/follower ports+ids and RealSense serials live in **`hardware_config.yaml`**, not in Python — edit that file when your USB layout changes, no code changes needed. Same resolution order as the extrinsics JSON (below), with its own env var **`LEROBOT_PLAYGROUND_HARDWARE_CONFIG`**. A dev-checkout copy ships at **`src/hardware_config.yaml`**:
+Everything needed to run teleop — hardware wiring **and** run settings — lives in **`teleop_config.yaml`**, not in Python. Edit that file when your USB layout or run settings change; no code changes needed. Same resolution order as the extrinsics JSON (below), with its own env var **`LEROBOT_PLAYGROUND_TELEOP_CONFIG`**. A dev-checkout copy ships at **`src/teleop_config.yaml`**:
 
 ```yaml
 leaders:
@@ -56,9 +56,18 @@ followers:
     id: bender_follower_arm
 realsense_serials:
   - "244622072067"
+
+extrinsic_json: extrinsic_calibration.json
+recording_name: ""
+tune: true
+camera_width: 848
+camera_height: 480
+camera_fps: 60
+publish_to_foxglove: true
+display_point_cloud_viewer: false
 ```
 
-`leaders`/`followers` must be the same length (matched by list position); `realsense_serials` needs at least one entry.
+`leaders`/`followers` must be the same length (matched by list position); `realsense_serials` needs at least one entry. See `src/teleop_config.yaml` for the full set of fields and their defaults, or `lerobot_playground.teleop_config.TeleopSystemConfig` for field docs.
 
 ### Calibration files
 
@@ -68,11 +77,7 @@ Extrinsics are **not** bundled in the package. Resolution order for the default 
 2. File in the **current working directory**.
 3. In a dev checkout, **`src/extrinsic_calibration.json`** next to the installed package tree.
 
-You can always pass an explicit path:
-
-```bash
-lerobot-teleop --extrinsic-json /path/to/extrinsic_calibration.json
-```
+Set an explicit path via the `extrinsic_json` field in `teleop_config.yaml`.
 
 ### How to run
 
@@ -80,82 +85,49 @@ lerobot-teleop --extrinsic-json /path/to/extrinsic_calibration.json
 lerobot-teleop
 ```
 
-Useful flags:
+Flags:
 
 | Flag | Meaning |
 |------|---------|
-| `--hz 60` | Main loop rate in Hz (default `60`). Use `0` or negative for no pacing. |
-| `--recording_name NAME` | If non-empty, records RGB/depth per camera and gripper points under `recordings/NAME/`. |
-| `--extrinsic-json PATH` | Camera extrinsics JSON (see above). |
-| `--realsense-serial SERIAL` | Repeat once per camera (order must match keys in the extrinsics JSON). If omitted, uses defaults from `TeleopSystemConfig`. |
-| `--camera-width 848` | RealSense color/depth stream width. |
-| `--camera-height 480` | RealSense color/depth stream height. |
-| `--camera-fps 60` | RealSense color/depth stream FPS. |
-| `--no-tune` | Disable the Tk capture/save control panel. |
-| `--visualization foxglove` | `foxglove`, `open3d`, `both`, or `none`. `open3d` displays the full fused scene cloud plus the robot cloud in `point_cloud_viewer`. |
+| `--config PATH` | Teleop config YAML (see above). Omit to use the default `teleop_config.yaml`. |
+| `--hz 60` | Main loop rate in Hz (default `60`). Use `0` or negative for no pacing. This is a run-loop setting, not part of the config file. |
+
+Everything else — recording, extrinsics path, RealSense serials, camera resolution/FPS, the tune panel, and the visualization backend (`publish_to_foxglove` / `display_point_cloud_viewer`) — is set in `teleop_config.yaml`, not on the command line.
 
 Examples:
 
 ```bash
-# Default rate, no recording
+# Default config file, default rate
 lerobot-teleop
 
-# Record a session
-lerobot-teleop --recording_name my_run
+# Use a different config file
+lerobot-teleop --config ./my_teleop_config.yaml
 
-# Slower loop, explicit extrinsics
-lerobot-teleop --hz 10 --extrinsic-json ./my_extrinsics.json
-
-# Two cameras with explicit serials
-lerobot-teleop --realsense-serial 111 --realsense-serial 222
-
-# Lower camera resolution
-lerobot-teleop --camera-width 640 --camera-height 480 --camera-fps 30
-
-# Skip Foxglove and show the full scene + robot clouds in Open3D
-lerobot-teleop --visualization open3d
+# Slower loop
+lerobot-teleop --hz 10
 ```
 
-With `--visualization foxglove` or `both`, open **Foxglove** and connect to the websocket URL printed in the console to view fused point clouds, transforms, and the robot cloud. With `--visualization open3d` or `both`, an Open3D `point_cloud_viewer` window displays the full fused scene point cloud and overlays the robot cloud in red. Quit from the tuner UI or your usual session flow as implemented in `StateTuner`.
+With `publish_to_foxglove: true` in the config, open **Foxglove** and connect to the websocket URL printed in the console to view fused point clouds, transforms, and the robot cloud. With `display_point_cloud_viewer: true`, an Open3D `point_cloud_viewer` window displays the full fused scene point cloud and overlays the robot cloud in red. Quit from the tuner UI or your usual session flow as implemented in `StateTuner`.
 
 ### Custom teleop script
 
-Build a **`TeleopSystemConfig`** (`lerobot_playground.hardware_config`) with **`SO101AxisConfig`** entries for each **leader** and **follower** (`port` + LeRobot `id`), **`realsense_serials`**, and optional fields (`urdf_path`, `robot_calibration_ids`, `camera_width`, `camera_height`, `camera_fps`, `tune`, `publish_to_foxglove`, `display_point_cloud_viewer`). **`len(leaders)` must equal `len(followers)`** (one leader action per follower). **`robot_calibration_ids`** defaults to each follower’s `id`; the **first** follower’s observation drives the mesh / TF visualization returned as **`robot_pcd`** and **`robot_link_pcds`**. Robot mesh points are sampled once at startup and then transformed by FK every step.
+Build a **`TeleopSystemConfig`** (`lerobot_playground.teleop_config`) with **`SO101AxisConfig`** entries for each **leader** and **follower** (`port` + LeRobot `id`), **`realsense_serials`**, and optional fields (`urdf_path`, `robot_calibration_ids`, `camera_width`, `camera_height`, `camera_fps`, `tune`, `publish_to_foxglove`, `display_point_cloud_viewer`). **`len(leaders)` must equal `len(followers)`** (one leader action per follower). **`robot_calibration_ids`** defaults to each follower’s `id`; the **first** follower’s observation drives the mesh / TF visualization returned as **`robot_pcd`** and **`robot_link_pcds`**. Robot mesh points are sampled once at startup and then transformed by FK every step.
 
-**Minimal** (same behavior as the CLI defaults, but from your own file): call **`step()`** each tick for **`datapoints`**, **`scene_pcd`**, **`robot_pcd`**, and **`robot_link_pcds`**. `datapoints` contains the raw per-camera color/depth data used for fusion. `scene_pcd` is the full Open3D point cloud, so you can read both `np.asarray(scene_pcd.points)` and `np.asarray(scene_pcd.colors)`. `robot_pcd` is an **`(M, 3)`** **`float64`** array, and `robot_link_pcds` is a **`dict[str, np.ndarray]`** keyed by URDF link name. You can pass optional image masks into `step(masks_by_serial=...)`; nonzero / `True` pixels are kept. Call **`close()`** when `viewer.quit` is set:
+**Minimal** (same behavior as the CLI defaults, but from your own file): call **`step()`** each tick for **`datapoints`**, **`scene_pcd`**, **`robot_pcd`**, and **`robot_link_pcds`**. `datapoints` contains the raw per-camera color/depth data used for fusion. `scene_pcd` is the full Open3D point cloud, so you can read both `np.asarray(scene_pcd.points)` and `np.asarray(scene_pcd.colors)`. `robot_pcd` is an **`(M, 3)`** **`float64`** array, and `robot_link_pcds` is a **`dict[str, np.ndarray]`** keyed by URDF link name. You can pass optional image masks into `step(masks_by_serial=...)`; nonzero / `True` pixels are kept. Call **`close()`** when `viewer.quit` is set.
+
+Load from a YAML file with `load_teleop_system_config` (same loader `lerobot-teleop --config` uses):
 
 ```python
 import time
-from dataclasses import replace
 
 from lerobot_playground.control.teleop import TeleopPointCloudSystem
-from lerobot_playground.hardware_config import SO101AxisConfig, TeleopSystemConfig
+from lerobot_playground.teleop_config import load_teleop_system_config
 
 if __name__ == "__main__":
     hz = 15.0
     period_s = None if hz <= 0 else 1.0 / hz
 
-    config = replace(
-        TeleopSystemConfig(),
-        realsense_serials=("YOUR_SERIAL_0", "YOUR_SERIAL_1"),
-        extrinsic_json="extrinsic_calibration.json",
-        recording_name="",
-        camera_width=640,
-        camera_height=480,
-        camera_fps=30,
-        action_interpolation_duration_s=0.12,
-        action_command_hz=50.0,
-        publish_to_foxglove=False,
-        display_point_cloud_viewer=True,
-        leaders=(
-            SO101AxisConfig("/dev/ttyACM0", "bender_leader_arm"),
-            SO101AxisConfig("/dev/ttyACM1", "clamps_leader_arm"),
-        ),
-        followers=(
-            SO101AxisConfig("/dev/ttyACM3", "bender_follower_arm"),
-            SO101AxisConfig("/dev/ttyACM2", "clamps_follower_arm"),
-        ),
-    )
+    config = load_teleop_system_config("./my_teleop_config.yaml")
 
     system = TeleopPointCloudSystem(config)
     system.connect()

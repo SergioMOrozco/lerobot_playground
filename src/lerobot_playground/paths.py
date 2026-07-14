@@ -67,13 +67,13 @@ def resolve_extrinsic_calibration_json(path: str | Path) -> Path:
     )
 
 
-def resolve_hardware_config_yaml(path: str | Path) -> Path:
-    """Resolve ``hardware_config.yaml`` (leader/follower ports+ids, RealSense serials).
+def resolve_teleop_config_yaml(path: str | Path) -> Path:
+    """Resolve ``teleop_config.yaml`` (the full :class:`TeleopSystemConfig`, as YAML).
 
     See :func:`_resolve_repo_file` for the search order.
     """
     return _resolve_repo_file(
         path,
-        env_var="LEROBOT_PLAYGROUND_HARDWARE_CONFIG",
-        not_found_msg="Hardware config YAML not found.",
+        env_var="LEROBOT_PLAYGROUND_TELEOP_CONFIG",
+        not_found_msg="Teleop config YAML not found.",
     )
