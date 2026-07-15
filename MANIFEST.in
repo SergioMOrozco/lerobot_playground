@@ -1,1 +1,1 @@
-recursive-include src/lerobot_playground/calibration *
+recursive-include src/lerobot_3d/calibration *

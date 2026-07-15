@@ -3,7 +3,7 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lerobot-playground"
+name = "lerobot-3d"
 version = "0.1.0"
 description = "LeRobot SO101 experiments: multi-camera fusion, teleop + viser viewer, flow IK, SAM fused PCD."
 readme = "README.md"
@@ -35,10 +35,10 @@ sam = [
 ]
 
 [project.scripts]
-lerobot-teleop = "lerobot_playground.control.teleop:main"
-lerobot-flow-solver = "lerobot_playground.control.flow_solver:main"
-lerobot-sam-fused-pcd = "lerobot_playground.sam_fused_pcd:main"
-lerobot-flow-solver-so101 = "lerobot_playground.control.flow_solver_so101:main"
+lerobot-teleop = "lerobot_3d.control.teleop:main"
+lerobot-flow-solver = "lerobot_3d.control.flow_solver:main"
+lerobot-sam-fused-pcd = "lerobot_3d.sam_fused_pcd:main"
+lerobot-flow-solver-so101 = "lerobot_3d.control.flow_solver_so101:main"
 
 [tool.setuptools]
 include-package-data = true
@@ -47,4 +47,4 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-lerobot_playground = ["calibration/**/*"]
+lerobot_3d = ["calibration/**/*"]

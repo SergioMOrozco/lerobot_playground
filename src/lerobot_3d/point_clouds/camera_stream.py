@@ -4,8 +4,8 @@ import cv2
 import json
 import open3d as o3d
 
-from lerobot_playground.paths import resolve_extrinsic_calibration_json
-from lerobot_playground.point_clouds.point_cloud_viewer import LivePointCloudViewer
+from lerobot_3d.paths import resolve_extrinsic_calibration_json
+from lerobot_3d.point_clouds.point_cloud_viewer import LivePointCloudViewer
 
 
 def get_fused_point_cloud(datapoints):

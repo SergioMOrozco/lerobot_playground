@@ -11,7 +11,7 @@ from lerobot.utils.constants import HF_LEROBOT_CALIBRATION, ROBOTS
 from scipy.spatial.transform import Rotation
 from urchin import URDF
 
-from lerobot_playground.paths import CALIBRATION_DIR
+from lerobot_3d.paths import CALIBRATION_DIR
 
 
 class RobotState:
@@ -66,7 +66,7 @@ class RobotState:
             raise FileNotFoundError(
                 f"Robot calibration file not found for id '{id}': {path}. "
                 "Pass TeleopSystemConfig.robot_calibration_dir / robot_calibration_paths, "
-                "or set HF_LEROBOT_CALIBRATION so LeRobot and lerobot_playground use the same files."
+                "or set HF_LEROBOT_CALIBRATION so LeRobot and lerobot_3d use the same files."
             )
         return path
 

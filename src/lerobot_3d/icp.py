@@ -3,9 +3,9 @@ from PIL import Image
 import numpy as np
 import json
 import os
-from lerobot_playground.icp_new import discover_calibration_serials
-from lerobot_playground.point_clouds.camera_stream import MultiRealSenseStream, get_fused_point_cloud
-from lerobot_playground.point_clouds.point_cloud_viewer import LivePointCloudViewer
+from lerobot_3d.icp_new import discover_calibration_serials
+from lerobot_3d.point_clouds.camera_stream import MultiRealSenseStream, get_fused_point_cloud
+from lerobot_3d.point_clouds.point_cloud_viewer import LivePointCloudViewer
 
 def depth2pcd(depth, serial, color = None, T_wc= None, mask = None):
 

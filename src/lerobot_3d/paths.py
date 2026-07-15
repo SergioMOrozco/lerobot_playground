@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# ``lerobot_playground`` package root (directory containing ``calibration/``).
+# ``lerobot_3d`` package root (directory containing ``calibration/``).
 PACKAGE_ROOT: Path = Path(__file__).resolve().parent
 CALIBRATION_DIR: Path = PACKAGE_ROOT / "calibration"
 
@@ -62,7 +62,7 @@ def resolve_extrinsic_calibration_json(path: str | Path) -> Path:
     """
     return _resolve_repo_file(
         path,
-        env_var="LEROBOT_PLAYGROUND_EXTRINSIC_JSON",
+        env_var="LEROBOT_3D_EXTRINSIC_JSON",
         not_found_msg="Extrinsic calibration JSON not found.",
     )
 
@@ -74,6 +74,6 @@ def resolve_teleop_config_yaml(path: str | Path) -> Path:
     """
     return _resolve_repo_file(
         path,
-        env_var="LEROBOT_PLAYGROUND_TELEOP_CONFIG",
+        env_var="LEROBOT_3D_TELEOP_CONFIG",
         not_found_msg="Teleop config YAML not found.",
     )

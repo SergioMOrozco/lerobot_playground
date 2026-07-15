@@ -1,5 +1,5 @@
 # Full TeleopSystemConfig, as YAML. Edit this file to change hardware wiring or run
-# settings -- no code changes needed. See lerobot_playground.teleop_config for field docs.
+# settings -- no code changes needed. See lerobot_3d.teleop_config for field docs.
 
 # leaders/followers must be the same length (one leader drives one follower,
 # matched by list position). realsense_serials needs at least one entry.
@@ -14,7 +14,7 @@ followers:
 realsense_serials:
   - "044322073544"
 
-# Camera extrinsics JSON (cwd, LEROBOT_PLAYGROUND_EXTRINSIC_JSON, or src/ next to package).
+# Camera extrinsics JSON (cwd, LEROBOT_3D_EXTRINSIC_JSON, or src/ next to package).
 extrinsic_json: extrinsic_calibration.json
 
 # Non-empty -> write recordings/<name>/ on shutdown.

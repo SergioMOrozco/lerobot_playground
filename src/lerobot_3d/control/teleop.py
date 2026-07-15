@@ -8,8 +8,8 @@ import numpy as np
 import open3d as o3d
 
 from lerobot.teleoperators.so101_leader import SO101LeaderConfig, SO101Leader
-from lerobot_playground.teleop_config import TeleopSystemConfig, load_teleop_system_config
-from lerobot_playground.point_clouds.system_vis import SystemStateViewer
+from lerobot_3d.teleop_config import TeleopSystemConfig, load_teleop_system_config
+from lerobot_3d.point_clouds.system_vis import SystemStateViewer
 
 
 class TeleopPointCloudSystem:
@@ -59,7 +59,7 @@ def main() -> None:
         "--config",
         type=str,
         default=None,
-        help="Teleop system config YAML (cwd, LEROBOT_PLAYGROUND_TELEOP_CONFIG, or src/ next to "
+        help="Teleop system config YAML (cwd, LEROBOT_3D_TELEOP_CONFIG, or src/ next to "
         "package). Omit to use the default teleop_config.yaml.",
     )
     parser.add_argument(

@@ -1,6 +1,6 @@
 """Point-cloud tooling, SO101 control helpers, and calibration assets for LeRobot experiments."""
 
-from lerobot_playground.teleop_config import (
+from lerobot_3d.teleop_config import (
     SO101AxisConfig,
     TeleopSystemConfig,
     load_teleop_system_config,

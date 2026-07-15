@@ -1,7 +1,7 @@
 """``TeleopSystemConfig``: everything needed to run the teleop + point cloud system.
 
 Values live in ``teleop_config.yaml``, not here -- see :func:`load_teleop_system_config`.
-Edit that file (or point ``--config`` / ``LEROBOT_PLAYGROUND_TELEOP_CONFIG`` at your own copy)
+Edit that file (or point ``--config`` / ``LEROBOT_3D_TELEOP_CONFIG`` at your own copy)
 to change hardware wiring or run settings; no code changes needed.
 """
 from __future__ import annotations
@@ -13,11 +13,11 @@ from typing import Any, Mapping, Sequence
 
 import yaml
 
-from lerobot_playground.paths import resolve_teleop_config_yaml
+from lerobot_3d.paths import resolve_teleop_config_yaml
 
 DEFAULT_TELEOP_CONFIG_YAML = "teleop_config.yaml"
 """Default filename for the editable system config; resolved via
-:func:`lerobot_playground.paths.resolve_teleop_config_yaml`."""
+:func:`lerobot_3d.paths.resolve_teleop_config_yaml`."""
 
 
 @dataclass(frozen=True)
@@ -141,7 +141,7 @@ def load_teleop_system_config(path: str | Path | None = None) -> TeleopSystemCon
     """Load a full :class:`TeleopSystemConfig` from ``teleop_config.yaml``.
 
     Uses the same search order as camera extrinsics (env var, cwd, package-adjacent ``src/``);
-    see :func:`lerobot_playground.paths.resolve_teleop_config_yaml`. Pass ``None`` (or omit) to
+    see :func:`lerobot_3d.paths.resolve_teleop_config_yaml`. Pass ``None`` (or omit) to
     use the default filename, :data:`DEFAULT_TELEOP_CONFIG_YAML`.
     """
     resolved = resolve_teleop_config_yaml(DEFAULT_TELEOP_CONFIG_YAML if path is None else path)

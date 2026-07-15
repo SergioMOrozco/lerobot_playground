@@ -1,4 +1,4 @@
-# lerobot_playground
+# lerobot_3d
 
 SO101 multi-camera teleop, fused point clouds, a viser-based live viewer, and related calibration utilities.
 
@@ -7,14 +7,14 @@ SO101 multi-camera teleop, fused point clouds, a viser-based live viewer, and re
 **Editable** (recommended while developing):
 
 ```bash
-cd /path/to/lerobot_playground
+cd /path/to/lerobot_3d
 pip install -e .
 ```
 
 **Into another environment** from a checkout or wheel:
 
 ```bash
-pip install /path/to/lerobot_playground
+pip install /path/to/lerobot_3d
 ```
 
 **RealSense** cameras are required for teleop; install the extra so `pyrealsense2` is available:
@@ -25,10 +25,10 @@ pip install -e ".[realsense]"
 
 Other optional extras (see `pyproject.toml`): `viser` also pulls in `trimesh`, used only by the standalone `lerobot-flow-solver-so101` demo.
 
-Import the package in Python as `lerobot_playground`, for example:
+Import the package in Python as `lerobot_3d`, for example:
 
 ```python
-from lerobot_playground.paths import CALIBRATION_DIR
+from lerobot_3d.paths import CALIBRATION_DIR
 ```
 
 Other console entry points from this repo include `lerobot-flow-solver` and `lerobot-flow-solver-so101`. Those write artifacts under the current working directory unless you set **`LEROBOT_PLAYGROUND_ARTIFACT_DIR`**.
@@ -45,7 +45,7 @@ Teleop drives **N SO101 follower** arms from **N SO101 leader** teleoperators wh
 
 ### Teleop config
 
-Everything needed to run teleop — hardware wiring **and** run settings — lives in **`teleop_config.yaml`**, not in Python. Edit that file when your USB layout or run settings change; no code changes needed. Same resolution order as the extrinsics JSON (below), with its own env var **`LEROBOT_PLAYGROUND_TELEOP_CONFIG`**. A dev-checkout copy ships at **`src/teleop_config.yaml`**:
+Everything needed to run teleop — hardware wiring **and** run settings — lives in **`teleop_config.yaml`**, not in Python. Edit that file when your USB layout or run settings change; no code changes needed. Same resolution order as the extrinsics JSON (below), with its own env var **`LEROBOT_3D_TELEOP_CONFIG`**. A dev-checkout copy ships at **`src/teleop_config.yaml`**:
 
 ```yaml
 leaders:
@@ -66,13 +66,13 @@ camera_fps: 60
 viser_port: 8080
 ```
 
-`leaders`/`followers` must be the same length (matched by list position); `realsense_serials` needs at least one entry. See `src/teleop_config.yaml` for the full set of fields and their defaults, or `lerobot_playground.teleop_config.TeleopSystemConfig` for field docs.
+`leaders`/`followers` must be the same length (matched by list position); `realsense_serials` needs at least one entry. See `src/teleop_config.yaml` for the full set of fields and their defaults, or `lerobot_3d.teleop_config.TeleopSystemConfig` for field docs.
 
 ### Calibration files
 
 Extrinsics are **not** bundled in the package. Resolution order for the default filename `extrinsic_calibration.json`:
 
-1. Environment variable **`LEROBOT_PLAYGROUND_EXTRINSIC_JSON`** (absolute path to the file).
+1. Environment variable **`LEROBOT_3D_EXTRINSIC_JSON`** (absolute path to the file).
 2. File in the **current working directory**.
 3. In a dev checkout, **`src/extrinsic_calibration.json`** next to the installed package tree.
 
@@ -110,7 +110,7 @@ Open `http://localhost:<viser_port>` (default `8080`) in a browser to view the f
 
 ### Custom teleop script
 
-Build a **`TeleopSystemConfig`** (`lerobot_playground.teleop_config`) with **`SO101AxisConfig`** entries for each **leader** and **follower** (`port` + LeRobot `id`), **`realsense_serials`**, and optional fields (`urdf_path`, `robot_calibration_ids`, `camera_width`, `camera_height`, `camera_fps`, `tune`, `viser_port`). **`len(leaders)` must equal `len(followers)`** (one leader action per follower). **`robot_calibration_ids`** defaults to each follower’s `id`; the **first** follower’s observation drives the mesh / point-cloud visualization returned as **`robot_pcd`** and **`robot_link_pcds`**. Robot mesh points are sampled once at startup and then transformed by FK every step.
+Build a **`TeleopSystemConfig`** (`lerobot_3d.teleop_config`) with **`SO101AxisConfig`** entries for each **leader** and **follower** (`port` + LeRobot `id`), **`realsense_serials`**, and optional fields (`urdf_path`, `robot_calibration_ids`, `camera_width`, `camera_height`, `camera_fps`, `tune`, `viser_port`). **`len(leaders)` must equal `len(followers)`** (one leader action per follower). **`robot_calibration_ids`** defaults to each follower’s `id`; the **first** follower’s observation drives the mesh / point-cloud visualization returned as **`robot_pcd`** and **`robot_link_pcds`**. Robot mesh points are sampled once at startup and then transformed by FK every step.
 
 **Minimal** (same behavior as the CLI defaults, but from your own file): call **`step()`** each tick for **`datapoints`**, **`scene_pcd`**, **`robot_pcd`**, and **`robot_link_pcds`**. `datapoints` contains the raw per-camera color/depth data used for fusion. `scene_pcd` is the full Open3D point cloud, so you can read both `np.asarray(scene_pcd.points)` and `np.asarray(scene_pcd.colors)`. `robot_pcd` is an **`(M, 3)`** **`float64`** array, and `robot_link_pcds` is a **`dict[str, np.ndarray]`** keyed by URDF link name. You can pass optional image masks into `step(masks_by_serial=...)`; nonzero / `True` pixels are kept. Call **`close()`** when `viewer.quit` is set.
 
@@ -119,8 +119,8 @@ Load from a YAML file with `load_teleop_system_config` (same loader `lerobot-tel
 ```python
 import time
 
-from lerobot_playground.control.teleop import TeleopPointCloudSystem
-from lerobot_playground.teleop_config import load_teleop_system_config
+from lerobot_3d.control.teleop import TeleopPointCloudSystem
+from lerobot_3d.teleop_config import load_teleop_system_config
 
 if __name__ == "__main__":
     hz = 15.0
@@ -153,7 +153,7 @@ masks_by_serial = {
 datapoints, scene_pcd, robot_pcd, robot_link_pcds = system.step(masks_by_serial=masks_by_serial)
 ```
 
-For a fully custom stack (different robot type, no `TeleopPointCloudSystem`), start from **`SO101Leader`** / **`SO101Follower`** in LeRobot and **`SystemStateViewer`** in `lerobot_playground.point_clouds.system_vis`, passing a **`TeleopSystemConfig`** and calling **`update(*actions)`** with one dict per follower each tick.
+For a fully custom stack (different robot type, no `TeleopPointCloudSystem`), start from **`SO101Leader`** / **`SO101Follower`** in LeRobot and **`SystemStateViewer`** in `lerobot_3d.point_clouds.system_vis`, passing a **`TeleopSystemConfig`** and calling **`update(*actions)`** with one dict per follower each tick.
 
 For all CLI options:
 
