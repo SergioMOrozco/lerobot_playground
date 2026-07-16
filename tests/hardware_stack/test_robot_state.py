@@ -146,6 +146,80 @@ def test_convert_gripper_clips_negative_to_zero():
 
 
 # ---------------------------------------------------------------------------
+# radians_to_motor_action (inverse of convert_lerobot_action_to_radians)
+# ---------------------------------------------------------------------------
+
+
+def test_radians_to_motor_action_regular_joint_drive_mode_false():
+    state = _bare_robot_state()
+    state.PHYS_RANGES = {"j": {"lo": -1.0, "hi": 1.0, "drive_mode": False}}
+
+    result = state.radians_to_motor_action({"j": 1.0})
+
+    assert result["j.pos"] == pytest.approx(100.0)
+
+
+def test_radians_to_motor_action_regular_joint_drive_mode_true():
+    state = _bare_robot_state()
+    state.PHYS_RANGES = {"j": {"lo": -1.0, "hi": 1.0, "drive_mode": True}}
+
+    result = state.radians_to_motor_action({"j": -1.0})
+
+    assert result["j.pos"] == pytest.approx(100.0)
+
+
+def test_radians_to_motor_action_gripper_drive_mode_false():
+    state = _bare_robot_state()
+    state.PHYS_RANGES = {"gripper": {"lo": 0.0, "hi": 1.0, "drive_mode": False}}
+
+    result = state.radians_to_motor_action({"gripper": 1.0})
+
+    assert result["gripper.pos"] == pytest.approx(100.0)
+
+
+def test_radians_to_motor_action_gripper_drive_mode_true():
+    state = _bare_robot_state()
+    state.PHYS_RANGES = {"gripper": {"lo": 0.0, "hi": 1.0, "drive_mode": True}}
+
+    result = state.radians_to_motor_action({"gripper": 0.0})
+
+    assert result["gripper.pos"] == pytest.approx(100.0)
+
+
+def test_radians_to_motor_action_clips_out_of_range_radians():
+    state = _bare_robot_state()
+    state.PHYS_RANGES = {"j": {"lo": -1.0, "hi": 1.0, "drive_mode": False}}
+
+    result = state.radians_to_motor_action({"j": 5.0})
+
+    assert result["j.pos"] == pytest.approx(100.0)
+
+
+@pytest.mark.parametrize("drive_mode", [False, True])
+@pytest.mark.parametrize("norm", [-100.0, -37.0, 0.0, 42.0, 100.0])
+def test_radians_to_motor_action_is_inverse_of_convert_for_regular_joint(drive_mode, norm):
+    state = _bare_robot_state()
+    state.PHYS_RANGES = {"j": {"lo": -1.0, "hi": 1.0, "drive_mode": drive_mode}}
+
+    radians = state.convert_lerobot_action_to_radians({"j.pos": norm})
+    motor_action = state.radians_to_motor_action(radians)
+
+    assert motor_action["j.pos"] == pytest.approx(norm)
+
+
+@pytest.mark.parametrize("drive_mode", [False, True])
+@pytest.mark.parametrize("norm", [0.0, 25.0, 100.0])
+def test_radians_to_motor_action_is_inverse_of_convert_for_gripper(drive_mode, norm):
+    state = _bare_robot_state()
+    state.PHYS_RANGES = {"gripper": {"lo": 0.0, "hi": 1.0, "drive_mode": drive_mode}}
+
+    radians = state.convert_lerobot_action_to_radians({"gripper.pos": norm})
+    motor_action = state.radians_to_motor_action(radians)
+
+    assert motor_action["gripper.pos"] == pytest.approx(norm)
+
+
+# ---------------------------------------------------------------------------
 # sample_robot_points
 # ---------------------------------------------------------------------------
 
@@ -245,3 +319,37 @@ def test_robot_state_constructs_from_bundled_urdf_and_meshes(so101_calibration_p
     assert np.isfinite(robot_pcd).all()
     assert robot_link_pcds
     assert link_poses
+
+
+def test_solve_ik_position_converges_to_reachable_target(so101_calibration_path):
+    urdf_path = str(CALIBRATION_DIR / "so101_new_calib.urdf")
+    state = RobotState(urdf_path, "so101_test_id", calibration_path=so101_calibration_path)
+    gripper_link = state.robot_urdf.link_map["gripper_frame_link"]
+
+    target_joints = {name: 0.0 for name in SO101_JOINT_NAMES}
+    target_joints.update(shoulder_pan=0.2, shoulder_lift=-0.3, elbow_flex=0.4)
+    target_point = state.robot_urdf.link_fk(cfg=target_joints)[gripper_link][:3, 3]
+
+    initial_joints = {name: 0.0 for name in SO101_JOINT_NAMES}
+    solved = state.solve_ik_position(target_point, initial_joints)
+
+    solved_point = state.robot_urdf.link_fk(cfg=solved)[gripper_link][:3, 3]
+
+    assert solved_point == pytest.approx(target_point, abs=1e-3)
+    assert solved["gripper"] == pytest.approx(0.0)
+
+
+def test_solve_ik_position_respects_joint_limits(so101_calibration_path):
+    urdf_path = str(CALIBRATION_DIR / "so101_new_calib.urdf")
+    state = RobotState(urdf_path, "so101_test_id", calibration_path=so101_calibration_path)
+
+    far_away_target = np.array([100.0, 100.0, 100.0])
+    initial_joints = {name: 0.0 for name in SO101_JOINT_NAMES}
+
+    solved = state.solve_ik_position(far_away_target, initial_joints, max_iters=20)
+
+    for joint in SO101_JOINT_NAMES:
+        if joint == "gripper":
+            continue
+        r = state.PHYS_RANGES[joint]
+        assert r["lo"] - 1e-9 <= solved[joint] <= r["hi"] + 1e-9

@@ -18,3 +18,7 @@ class Datapoint:
     X_WC: np.ndarray
     color_intrinsics: object  # pyrealsense2.intrinsics-like: needs .fx/.fy/.ppx/.ppy
     obj_mask: np.ndarray | None = None
+    joint_positions: dict[str, float] | None = None
+    """Raw motor-space observation (``"<joint>.pos"`` keys) from the follower that produced
+    this step's robot state -- same format as ``Follower.get_observation()``/``send_action()``,
+    so it can be fed straight into ``RobotState`` or a new action without reconversion."""

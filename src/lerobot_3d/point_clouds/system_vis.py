@@ -117,6 +117,9 @@ class SystemStateViewer:
         robot_pcd_np, robot_link_pcds, link_poses = self.robot_state.get_robot_state(obs)
         datapoints = self.stream.get_datapoints()
 
+        for datapoint in datapoints:
+            datapoint.joint_positions = obs
+
         if self.viewer.capture:
             self.viewer.capture = False
 

@@ -228,3 +228,78 @@ class RobotState:
         robot_pcd, robot_link_pcds = self.sample_robot_points(fk_poses)
         link_poses = self.get_link_poses(fk_poses)
         return robot_pcd, robot_link_pcds, link_poses
+
+    def radians_to_motor_action(self, joint_positions):
+        """Inverse of :meth:`convert_lerobot_action_to_radians`: this robot's own
+        calibrated physical joint angles (radians) -> LeRobot motor-space
+        ``{"<joint>.pos": value}``, ready for ``Follower.send_action``.
+
+        Requires every joint in ``self.PHYS_RANGES`` (including ``"gripper"``) to be
+        present in ``joint_positions``, matching the forward conversion's contract.
+        """
+        action = {}
+        for joint, r in self.PHYS_RANGES.items():
+            lo, hi = r["lo"], r["hi"]
+            frac = 0.0 if hi == lo else (joint_positions[joint] - lo) / (hi - lo)
+            frac = float(np.clip(frac, 0.0, 1.0))
+
+            if joint == "gripper":
+                norm = (100.0 - 100.0 * frac) if r["drive_mode"] else (100.0 * frac)
+                lo_clip = 0.0
+            else:
+                norm = (100.0 - 200.0 * frac) if r["drive_mode"] else (200.0 * frac - 100.0)
+                lo_clip = -100.0
+
+            action[f"{joint}.pos"] = float(np.clip(norm, lo_clip, 100.0))
+
+        return action
+
+    def solve_ik_position(
+        self,
+        target_point,
+        initial_joint_positions,
+        *,
+        link_name="gripper_frame_link",
+        max_iters=50,
+        damping=1e-2,
+        tol=1e-4,
+        step_eps=1e-4,
+    ):
+        """Position-only IK: find joint radians whose ``link_name`` FK position matches
+        ``target_point`` (world frame, meters), starting from ``initial_joint_positions``.
+
+        Numerical-Jacobian damped-least-squares, since no closed-form IK exists for the
+        SO101's kinematic chain. Only the non-gripper joints (``PHYS_RANGES`` minus
+        ``"gripper"``) are solved for and clipped to this robot's own calibrated
+        ``PHYS_RANGES``; the gripper's radians pass through unchanged. Returns the full
+        joint-radians dict (arm + unchanged gripper), ready for
+        :meth:`radians_to_motor_action`.
+        """
+        target_point = np.asarray(target_point, dtype=np.float64)
+        arm_joints = [joint for joint in self.PHYS_RANGES if joint != "gripper"]
+        joints = dict(initial_joint_positions)
+        link = self.robot_urdf.link_map[link_name]
+
+        def eef_position(cfg):
+            return self.robot_urdf.link_fk(cfg=cfg)[link][:3, 3]
+
+        for _ in range(max_iters):
+            current_position = eef_position(joints)
+            error = target_point - current_position
+            if np.linalg.norm(error) < tol:
+                break
+
+            jacobian = np.zeros((3, len(arm_joints)))
+            for i, joint in enumerate(arm_joints):
+                perturbed = dict(joints)
+                perturbed[joint] = joints[joint] + step_eps
+                jacobian[:, i] = (eef_position(perturbed) - current_position) / step_eps
+
+            damped = jacobian @ jacobian.T + (damping**2) * np.eye(3)
+            delta = jacobian.T @ np.linalg.solve(damped, error)
+
+            for i, joint in enumerate(arm_joints):
+                r = self.PHYS_RANGES[joint]
+                joints[joint] = float(np.clip(joints[joint] + delta[i], r["lo"], r["hi"]))
+
+        return joints

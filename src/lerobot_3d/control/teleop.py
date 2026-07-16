@@ -27,11 +27,17 @@ class TeleopPointCloudSystem:
         print("Connected.")
 
     def step(
-        self, masks_by_serial=None
+        self, action=None, masks_by_serial=None
     ) -> tuple[list[dict], o3d.geometry.PointCloud, np.ndarray, dict[str, np.ndarray]]:
-        """One control cycle: read leaders, update followers and viewer, return sensor data.
+        """One control cycle: read leaders (or use ``action``), update followers and viewer.
 
         Args:
+            action: Optional per-follower action list (one motor-space dict per
+                follower, positionally aligned with ``config.followers`` -- same
+                shape ``SystemStateViewer.update()`` already expects). When given,
+                it's sent to the followers instead of the leaders' teleop action,
+                letting a caller (e.g. a computed IK target) drive the robot directly.
+                Omit to teleop from the leaders as before.
             masks_by_serial: Optional mapping ``{camera_serial: mask}`` or sequence of
                 masks aligned with ``config.realsense_serials``. Nonzero/True mask
                 pixels are kept in the fused scene point cloud.
@@ -44,7 +50,7 @@ class TeleopPointCloudSystem:
 
         Poll ``self.viewer.quit`` to know when to stop the outer loop, then call :meth:`close`.
         """
-        actions = [leader.get_action() for leader in self.leaders]
+        actions = action if action is not None else [leader.get_action() for leader in self.leaders]
         return self.viewer.update(*actions, masks_by_serial=masks_by_serial)
 
     def close(self) -> None:
